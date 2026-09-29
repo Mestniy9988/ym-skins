@@ -2,7 +2,6 @@ import { useState, type ReactNode } from 'react'
 import {
   Check,
   Heart,
-  Home,
   Pause,
   Play,
   Radio,
@@ -26,7 +25,7 @@ import { coverStyle, LCD_FONT, skinStyle, type PlayerProps } from './player'
 export const MOCK_W = 1120
 export const MOCK_H = 700
 
-export type Page = 'home' | 'wave' | 'music' | 'search' | 'settings'
+export type Page = 'wave' | 'music' | 'search' | 'settings'
 
 export type MockProps = PlayerProps & {
   page: Page
@@ -42,8 +41,7 @@ export type MockProps = PlayerProps & {
   onApply: (skinId: string, themeIdx: number) => void
 }
 
-const NAV: { page: Page; icon: typeof Home; label: string }[] = [
-  { page: 'home', icon: Home, label: 'Главная' },
+const NAV: { page: Page; icon: typeof Heart; label: string }[] = [
   { page: 'wave', icon: Radio, label: 'Моя волна' },
   { page: 'music', icon: Heart, label: 'Моя музыка' },
   { page: 'search', icon: Search, label: 'Поиск' },
@@ -106,7 +104,7 @@ function TrackRow({ t, index, p }: { t: Track; index: number; p: MockProps }) {
   )
 }
 
-function Empty({ icon: Icon, title, text, action }: { icon: typeof Home; title: string; text: string; action?: ReactNode }) {
+function Empty({ icon: Icon, title, text, action }: { icon: typeof Heart; title: string; text: string; action?: ReactNode }) {
   return (
     <div className="ym-empty">
       <span className="ym-empty-icon">
@@ -119,54 +117,10 @@ function Empty({ icon: Icon, title, text, action }: { icon: typeof Home; title: 
   )
 }
 
-function HomePage(p: MockProps) {
-  const hour = 19
-  return (
-    <div className="ym-page">
-      <h2 className="ym-page-title">{hour >= 18 ? 'Добрый вечер' : 'Добрый день'}</h2>
-      <section className="ym-hero ym-hero-home">
-        <div className="ym-hero-info">
-          <div className="ym-kicker">Моя волна</div>
-          <h1 className="ym-h1" key={`home-${p.track.id}`}>
-            Музыка под ваше настроение
-          </h1>
-          <div className="ym-sub">
-            Сейчас: {p.track.artist} — {p.track.title}
-          </div>
-          <div className="ym-hero-actions">
-            <button className="ym-btn ym-btn-primary" onClick={p.onToggle}>
-              {p.playing ? <Pause size={16} /> : <Play size={16} />}
-              {p.playing ? 'Пауза' : 'Слушать'}
-            </button>
-            <button className="ym-btn ym-btn-ghost" onClick={() => p.onPage('wave')}>
-              Открыть волну
-            </button>
-          </div>
-        </div>
-        <div className="hero-vis">
-          <Visualizer mode={p.skin.vis === 'vu' ? 'spectrum' : p.skin.vis} playing={p.playing} animate={p.animate} bands={26} font={LCD_FONT[p.skin.id]} />
-        </div>
-      </section>
-      <div className="ym-section-title">Недавно слушали</div>
-      <div className="ym-cards">
-        {TRACKS.slice(0, 5).map((t) => (
-          <button key={t.id} className="ym-card" data-active={t.id === p.track.id} onClick={() => p.onSelect(TRACKS.indexOf(t))}>
-            <span className="ym-card-cover" style={coverStyle(t)}>
-              <span className="ym-card-play">{t.id === p.track.id && p.playing ? <Pause size={16} /> : <Play size={16} />}</span>
-            </span>
-            <b>{t.title}</b>
-            <small>{t.artist}</small>
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 function WavePage(p: MockProps) {
   const [mood, setMood] = useState(0)
   const idx = TRACKS.findIndex((t) => t.id === p.track.id)
-  const upNext = [1, 2, 3].map((k) => TRACKS[(idx + k) % TRACKS.length])
+  const upNext = [1, 2, 3, 4, 5].map((k) => TRACKS[(idx + k) % TRACKS.length])
   return (
     <div className="ym-page">
       <section className="ym-hero">
@@ -484,7 +438,6 @@ export function AppMock(props: MockProps) {
         </aside>
 
         <main className="ym-main">
-          {page === 'home' && <HomePage {...props} />}
           {page === 'wave' && <WavePage {...props} />}
           {page === 'music' && <MusicPage {...props} />}
           {page === 'search' && <SearchPage {...props} />}

@@ -9,12 +9,12 @@ import { ORIGINAL, SKINS, TRACKS } from '@/data/skins'
 type Example = { skin: string; theme: number; page: Page; title: string; caption: string; query?: string }
 
 const EXAMPLES: Example[] = [
-  { skin: 'classic98', theme: 0, page: 'home', title: "Classic '98", caption: 'Главная' },
   { skin: 'vinyl', theme: 0, page: 'wave', title: 'Vinyl Turntable', caption: 'Моя волна' },
+  { skin: 'classic98', theme: 0, page: 'music', title: "Classic '98", caption: 'Моя музыка' },
   { skin: 'neon', theme: 0, page: 'search', title: 'Neon Cyber', caption: 'Поиск трека', query: 'ноч' },
   { skin: 'aqua', theme: 0, page: 'settings', title: 'Aqua Jelly', caption: 'Настройки и выбор скина' },
 ]
-const PAGES: Page[] = ['home', 'wave', 'music', 'search', 'settings']
+const PAGES: Page[] = ['wave', 'music', 'search', 'settings']
 
 function readHash() {
   const p = new URLSearchParams(window.location.hash.slice(1))
@@ -24,7 +24,7 @@ function readHash() {
   const skin = skinIdx >= 0 ? skinIdx : SKINS.findIndex((s) => s.id === base.skin)
   const themeIdx = Math.max(0, SKINS[skin].themes.findIndex((t) => t.id === p.get('theme')))
   const page = (PAGES.includes(p.get('page') as Page) ? p.get('page') : base.page) as Page
-  return { ex, skin, themeIdx: p.get('theme') ? themeIdx : base.theme, page, original: p.get('original') === '1', query: base.query ?? '' }
+  return { ex, skin, themeIdx: p.get('theme') ? themeIdx : base.theme, page, original: p.get('original') === '1', query: p.get('q') ?? base.query ?? '', embed: p.get('embed') === '1' }
 }
 
 export default function App() {
@@ -86,6 +86,49 @@ export default function App() {
 
   const toggleLike = (id: number) => setLikedIds((l) => ({ ...l, [id]: !l[id] }))
 
+  const mock = (
+    <AppMock
+      skin={skin}
+      theme={theme}
+      track={track}
+      pos={pos}
+      playing={playing}
+      animate={animate}
+      liked={!!likedIds[track.id]}
+      onToggle={() => setPlaying((p) => !p)}
+      onNext={next}
+      onPrev={prev}
+      onLike={() => toggleLike(track.id)}
+      onSeek={(p) => setPos(Math.max(0, Math.min(track.dur - 1, p)))}
+      onSelect={(i) => {
+        setTrackIdx(i)
+        setPos(0)
+        setPlaying(true)
+      }}
+      page={page}
+      onPage={setPage}
+      likedIds={likedIds}
+      onLikeId={toggleLike}
+      query={query}
+      onQuery={setQuery}
+      original={original}
+      onOriginal={setOriginal}
+      chosenSkin={chosenSkin}
+      chosenThemeIdx={themeIdx}
+      onApply={(id, t) => {
+        setSkinIdx(SKINS.findIndex((s) => s.id === id))
+        setThemeIdx(t)
+      }}
+    />
+  )
+
+  if (initial.embed)
+    return (
+      <div className="bg-[#0b0b0f]" style={{ width: MOCK_W, height: MOCK_H }}>
+        {mock}
+      </div>
+    )
+
   return (
     <div className="min-h-screen bg-[#0b0b0f] text-zinc-100">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(60%_40%_at_20%_0%,rgba(255,196,0,.08),transparent),radial-gradient(40%_30%_at_90%_10%,rgba(120,80,255,.08),transparent)]" />
@@ -97,7 +140,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-lg font-bold tracking-tight sm:text-xl">YM Skins — минималистичный интерфейс</h1>
-              <p className="text-sm text-zinc-400">Четыре раздела, настройки с выбором скина и оригинальной темой</p>
+              <p className="text-sm text-zinc-400">Моя волна, Моя музыка, Поиск и Настройки с выбором скина и оригинальной темой</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -140,39 +183,7 @@ export default function App() {
 
         <div className="rounded-2xl border border-white/10 bg-[repeating-conic-gradient(#15151b_0_25%,#101015_0_50%)] bg-[length:24px_24px] p-3 shadow-2xl shadow-black/50 sm:p-6">
           <Scaler width={MOCK_W} height={MOCK_H}>
-            <AppMock
-              skin={skin}
-              theme={theme}
-              track={track}
-              pos={pos}
-              playing={playing}
-              animate={animate}
-              liked={!!likedIds[track.id]}
-              onToggle={() => setPlaying((p) => !p)}
-              onNext={next}
-              onPrev={prev}
-              onLike={() => toggleLike(track.id)}
-              onSeek={(p) => setPos(Math.max(0, Math.min(track.dur - 1, p)))}
-              onSelect={(i) => {
-                setTrackIdx(i)
-                setPos(0)
-                setPlaying(true)
-              }}
-              page={page}
-              onPage={setPage}
-              likedIds={likedIds}
-              onLikeId={toggleLike}
-              query={query}
-              onQuery={setQuery}
-              original={original}
-              onOriginal={setOriginal}
-              chosenSkin={chosenSkin}
-              chosenThemeIdx={themeIdx}
-              onApply={(id, t) => {
-                setSkinIdx(SKINS.findIndex((s) => s.id === id))
-                setThemeIdx(t)
-              }}
-            />
+            {mock}
           </Scaler>
         </div>
 
