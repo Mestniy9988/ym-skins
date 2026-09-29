@@ -6,10 +6,13 @@ import path from 'node:path';
 import test from 'node:test';
 import vm from 'node:vm';
 
+import { findAudioGraphMarkers } from '../lib/audio-graph.mjs';
+import { classifyLoopback } from '../lib/loopback.mjs';
+import { selectorMapFor } from '../lib/selector-map.mjs';
 import { readRootPackage, writeFixtureAsar } from '../lib/asar-meta.mjs';
 import { waitForPageTarget } from '../lib/cdp.mjs';
 import { executeProbe } from '../lib/execute.mjs';
-import { clientSpawnOptions, tasklistHasPid } from '../lib/launch.mjs';
+import { chromeSandboxMode, clientSpawnOptions, linuxDebugExtras, tasklistHasPid } from '../lib/launch.mjs';
 import {
   FUSE_SENTINEL,
   FUSE_V1_NAMES,
@@ -23,6 +26,8 @@ import {
   installFolders,
   isMusicDisplayName,
   knownInstallDirs,
+  linuxClientCandidate,
+  linuxInstallDirs,
 } from '../lib/find-client.mjs';
 import {
   POC_BACKGROUND,
@@ -30,6 +35,7 @@ import {
   analyserProbe,
   applySurface,
   menuProbe,
+  readAnalyserPeaks,
   pageExpression,
   pickButton,
   readSurface,
@@ -42,6 +48,7 @@ import {
   classifyListeners,
   decideRun,
   parseNetstat,
+  parseProcNet,
   pickPageTarget,
   sameColor,
 } from '../lib/plan.mjs';
@@ -190,10 +197,14 @@ test('two registry installs are not silently collapsed into one', () => {
   assert.equal(chosen.client, null);
 });
 
-test('launch is refused off Windows, without a client, and while the client is already open', () => {
+test('launch is refused off Windows and Linux, without a client, and while the client is already open', () => {
   assert.deepEqual(
-    decideRun({ platform: 'linux', client: { exe: 'x' }, alreadyRunning: false }),
+    decideRun({ platform: 'darwin', client: { exe: 'x' }, alreadyRunning: false }),
     { launch: false, code: 'not-windows' },
+  );
+  assert.deepEqual(
+    decideRun({ platform: 'linux', client: null, alreadyRunning: false }),
+    { launch: false, code: 'client-not-found' },
   );
   assert.deepEqual(
     decideRun({ platform: 'win32', client: null, alreadyRunning: false }),
@@ -205,6 +216,10 @@ test('launch is refused off Windows, without a client, and while the client is a
   );
   assert.equal(
     decideRun({ platform: 'win32', client: { exe: 'x' }, alreadyRunning: false }).launch,
+    true,
+  );
+  assert.equal(
+    decideRun({ platform: 'linux', client: { exe: 'x' }, alreadyRunning: false }).launch,
     true,
   );
 });
@@ -377,15 +392,18 @@ test('page scripts change one button and the background and do not touch storage
   assert.equal(after.buttonBackground, POC_BUTTON);
   assert.equal(after.buttonTestId, 'PLAY');
   assert.equal(after.stylePresent, true);
+  assert.equal(doc.styleText.includes('background-image: none'), true);
   assert.equal(sameColor(after.background, 'rgba(58, 24, 72, 1)'), true);
   const removed = removeSurface(doc);
   assert.equal(removed.removedStyle, true);
   assert.equal(readSurface(doc, computed).stylePresent, false);
   assert.equal(button.attrs['data-yms-poc'], undefined);
 
-  const sources = [readSurface, applySurface, removeSurface, analyserProbe, menuProbe, pickButton]
-    .map((fn) => pageExpression(fn))
-    .join('\n');
+  const sources = [
+    ...[readSurface, applySurface, removeSurface, analyserProbe, menuProbe, pickButton]
+      .map((fn) => pageExpression(fn)),
+    readAnalyserPeaks.toString(),
+  ].join('\n');
   assert.equal(auditExpression(sources), null);
   const audio = analyserProbe({
     AudioContext: class AudioContext {},
@@ -426,21 +444,111 @@ test('the play control is styled by its test id, not by a marker attribute', () 
   assert.equal(readSurface(doc, computed).stylePresent, false);
 });
 
-test('menu probe hides one node and puts the page back', () => {
+test('menu probe hides one known nav item and puts the page back', () => {
   const item = element('a');
   item.style.display = 'block';
+  item.attrs['data-test-id'] = 'NAVBAR_NAVIGATION_ITEM_KIDS';
   const nav = element('nav');
   nav.children.push(item);
   const body = element('body');
   const doc = fakeDocument({ body, head: element('head'), navs: [nav] });
   const result = menuProbe(doc, computed);
   assert.equal(result.navCount, 1);
+  assert.equal(result.hideTried, true);
+  assert.equal(result.hiddenTestId, 'NAVBAR_NAVIGATION_ITEM_KIDS');
   assert.equal(result.hideApplied, true);
   assert.equal(result.hideReverted, true);
   assert.equal(result.settingsPageOpened, false);
   assert.equal(result.bodyInsertRemoved, true);
+  assert.equal(result.navbarFound, false);
+  assert.equal(result.settingsListFound, false);
+  assert.equal(result.regionScreen, false);
   assert.equal(item.style.display, 'block');
+  assert.equal(item.attrs['data-yms-poc-hide'], undefined);
   assert.equal(doc.getElementById('ym-skins-poc-settings-probe'), null);
+});
+
+test('menu probe does not hide an unnamed nav child', () => {
+  const item = element('a');
+  item.style.display = 'block';
+  const nav = element('nav');
+  nav.children.push(item);
+  const doc = fakeDocument({ body: element('body'), head: element('head'), navs: [nav] });
+  const result = menuProbe(doc, computed);
+  assert.equal(result.hideTried, false);
+  assert.equal(item.style.display, 'block');
+});
+
+test('region screen is recorded and a navbar test id is visible to the probe', () => {
+  const body = element('body');
+  body.innerText = 'Yandex Music is currently not available in your region';
+  const navbar = element('div');
+  navbar.attrs['data-test-id'] = 'NAVBAR';
+  const doc = fakeDocument({ body, head: element('head'), extras: [navbar] });
+  const result = menuProbe(doc, computed);
+  assert.equal(result.regionScreen, true);
+  assert.equal(result.navbarFound, true);
+  assert.equal(result.settingsListFound, false);
+  assert.equal(result.settingsPageOpened, false);
+  assert.equal(result.hideTried, false);
+});
+
+test('analyser peaks come from existing nodes only', () => {
+  const loud = [{
+    frequencyBinCount: 4,
+    fftSize: 32,
+    context: { state: 'running' },
+    getByteFrequencyData(bins) {
+      bins.set([0, 12, 3, 0]);
+    },
+  }];
+  assert.deepEqual(readAnalyserPeaks.call(loud), { count: 1, peak: 12, running: 1, fftSize: 32 });
+  const quiet = [{
+    frequencyBinCount: 2,
+    fftSize: 32,
+    context: { state: 'suspended' },
+    getByteFrequencyData(bins) {
+      bins.fill(0);
+    },
+  }];
+  assert.deepEqual(readAnalyserPeaks.call(quiet), { count: 1, peak: 0, running: 0, fftSize: 32 });
+  assert.deepEqual(readAnalyserPeaks.call([]), { count: 0, peak: 0, running: 0, fftSize: null });
+});
+
+test('selector map is only the 5.121.2 ids read from that client', () => {
+  const map = selectorMapFor('5.121.2');
+  assert.equal(map.elements.sidebar, 'NAVBAR');
+  assert.equal(map.elements['nav.wave'], 'NAVBAR_NAVIGATION_ITEM_HOME');
+  assert.equal(map.elements['nav.search'], 'NAVBAR_NAVIGATION_ITEM_SEARCH');
+  assert.equal(map.elements['settings.page'], 'SETTINGS_LIST');
+  assert.equal(map.elements['nav.hidden'].includes('NAVBAR_NAVIGATION_ITEM_KIDS'), true);
+  assert.equal(map.settingsPath, '/settings');
+  assert.equal(selectorMapFor('5.0.0'), null);
+  assert.equal(selectorMapFor(null), null);
+});
+
+test('linux loopback is unchecked only when a sound device exists', () => {
+  assert.equal(classifyLoopback({ platform: 'linux', hasSoundDevice: false, hasPulseServer: false }), 'no-device');
+  assert.equal(classifyLoopback({ platform: 'linux', hasSoundDevice: true, hasPulseServer: false }), 'present-untested');
+  assert.equal(classifyLoopback({ platform: 'win32', hasSoundDevice: false, hasPulseServer: false }), 'not-checked');
+});
+
+test('audio graph markers are read from the archive without copying it', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ym-audio-'));
+  const file = path.join(dir, 'app.asar');
+  const gap = 'x'.repeat(80);
+  fs.writeFileSync(file, `createMediaElementSource${gap}createAnalyser${gap}getByteFrequencyData`);
+  assert.deepEqual(findAudioGraphMarkers(file), {
+    mediaElement: true,
+    analyser: true,
+    frequency: true,
+    complete: true,
+  });
+  fs.writeFileSync(file, 'createMediaElementSource only');
+  const partial = findAudioGraphMarkers(file);
+  assert.equal(partial.complete, false);
+  assert.equal(partial.analyser, false);
+  fs.rmSync(dir, { recursive: true });
 });
 
 test('empty report marks every stage-1 item unchecked and does not claim a patch', () => {
@@ -460,15 +568,137 @@ test('empty report marks every stage-1 item unchecked and does not claim a patch
   assert.equal(text.includes('app.asar не изменялся'), false);
 });
 
-test('linux refusal report does not look like a successful client run', () => {
+test('darwin refusal report does not look like a successful client run', () => {
   const text = buildReport({
-    platform: 'linux',
+    platform: 'darwin',
     decision: 'not-windows',
   });
   assert.match(text, /не запускался/);
   assert.match(text, /не проверено/);
   assert.equal(text.includes('вариант А рабочий'), false);
   assert.equal(text.includes('app.asar не изменялся'), false);
+});
+
+test('a finished linux run is not described as a Windows check', () => {
+  const text = buildReport({
+    platform: 'linux',
+    decision: 'launch',
+    client: {
+      exe: '/opt/Яндекс Музыка/yandexmusic',
+      source: 'known-path',
+      displayName: 'Яндекс Музыка',
+    },
+    launch: { port: 43123, loopback: true, gtk3: true, noSandbox: true },
+    surface: {
+      originalBackground: 'rgb(245, 245, 245)',
+      styledBackground: POC_BACKGROUND,
+      originalButton: 'rgb(1, 1, 1)',
+      styledButton: POC_BUTTON,
+      buttonFound: true,
+      absentAfterRestart: true,
+      restoredAfterReinject: true,
+    },
+    asar: { before: 'abc', after: 'abc' },
+  });
+  assert.match(text, /не проверка Windows 11/);
+  assert.match(text, /Linux-клиент/);
+  assert.match(text, /--no-sandbox/);
+  assert.match(text, /--gtk-version=3/);
+  assert.match(text, /выбран вариант А/);
+  assert.match(text, /Windows-сборка этим прогоном не проверялась/);
+  assert.equal(text.includes('Платформа прогона: win32'), false);
+  assert.equal(text.includes('вариант А рабочий'), false);
+});
+
+test('report names the bundled audio graph and the region screen', () => {
+  const text = buildReport({
+    platform: 'linux',
+    decision: 'launch',
+    client: { exe: '/opt/yandexmusic/yandexmusic', source: 'known-path', displayName: 'Яндекс Музыка' },
+    launch: { port: 9, loopback: true },
+    surface: {
+      originalBackground: 'rgb(1, 1, 1)',
+      styledBackground: POC_BACKGROUND,
+      originalButton: 'rgb(2, 2, 2)',
+      styledButton: POC_BUTTON,
+      buttonFound: true,
+      absentAfterRestart: true,
+      restoredAfterReinject: true,
+    },
+    analyser: {
+      hasAudioContextCtor: true,
+      hasAnalyserNode: true,
+      liveContexts: 0,
+      analyserCount: 0,
+      spectrumPeak: 0,
+      spectrumRead: false,
+    },
+    audioGraph: { mediaElement: true, analyser: true, frequency: true, complete: true },
+    menu: {
+      navCount: 0,
+      hideTried: false,
+      navbarFound: false,
+      settingsListFound: false,
+      settingsPageOpened: false,
+      regionScreen: true,
+      bodyInsertRemoved: true,
+    },
+    asar: { before: 'abc', after: 'abc' },
+  });
+  assert.match(text, /createMediaElementSource/);
+  assert.match(text, /Готовых AnalyserNode в странице нет/);
+  assert.match(text, /недоступен в этом регионе/);
+  assert.match(text, /NAVBAR на странице не найдена/);
+  assert.match(text, /SETTINGS_LIST не найден/);
+  assert.match(text, /Системный loopback не проверялся/);
+  assert.equal(text.includes('патч выполнен'), false);
+});
+
+test('report describes a silent running analyser and a missing loopback device', () => {
+  const text = buildReport({
+    platform: 'linux',
+    decision: 'launch',
+    versions: { asar: '5.121.2' },
+    client: { exe: '/opt/yandexmusic/yandexmusic', source: 'known-path', displayName: 'Яндекс Музыка' },
+    launch: { port: 9, loopback: true },
+    surface: {
+      originalBackground: 'rgb(1, 1, 1)',
+      styledBackground: POC_BACKGROUND,
+      originalButton: 'rgb(2, 2, 2)',
+      styledButton: POC_BUTTON,
+      buttonFound: true,
+      absentAfterRestart: true,
+      restoredAfterReinject: true,
+    },
+    analyser: {
+      hasAudioContextCtor: true,
+      hasAnalyserNode: true,
+      liveContexts: 3,
+      analyserCount: 3,
+      spectrumPeak: 0,
+      contextRunning: 3,
+      fftSize: 32,
+      spectrumRead: false,
+    },
+    loopback: { status: 'no-device' },
+    selectorMap: selectorMapFor('5.121.2'),
+    menu: {
+      navCount: 0,
+      hideTried: false,
+      navbarFound: false,
+      settingsListFound: false,
+      settingsPageOpened: false,
+      regionScreen: true,
+      pageCount: 1,
+      bodyInsertRemoved: true,
+    },
+  });
+  assert.match(text, /контекст running: 3/);
+  assert.match(text, /fftSize 32/);
+  assert.match(text, /устройство вывода не найдено/);
+  assert.match(text, /Карта селекторов 5\.121\.2/);
+  assert.match(text, /Отладчик отдал одну страницу/);
+  assert.equal(text.includes('Системный loopback не проверялся'), false);
 });
 
 test('a finished windows run reports fuses, re-injection and an untouched archive', () => {
@@ -529,6 +759,7 @@ test('a finished windows run reports fuses, re-injection and an untouched archiv
   assert.match(text, /app\.asar не изменялся|файл не переписывался/);
   assert.match(text, /спектр не снимался|не проверено/);
   assert.match(text, /страница настроек не открывалась/);
+  assert.match(text, /выбран вариант А/);
   assert.match(text, /Подпись macOS[\s\S]*не проверено/);
   assert.equal(text.includes('патч выполнен'), false);
 });
@@ -584,11 +815,72 @@ test('the client process is detached and a tasklist row identifies its pid', () 
   assert.equal(options.detached, true);
   assert.equal(options.stdio, 'ignore');
   assert.equal(options.cwd, 'C:\\YM');
+  assert.equal(options.env, undefined);
+  const linux = clientSpawnOptions('/opt/Яндекс Музыка/yandexmusic');
+  assert.equal(linux.cwd, '/opt/Яндекс Музыка');
+  assert.equal(linux.detached, true);
+  if (process.platform === 'linux') {
+    assert.match(linux.env.HOME, /ym-skins-probe-home$/);
+    assert.notEqual(linux.env.HOME, process.env.HOME);
+  }
   assert.equal(tasklistHasPid('"YandexMusic.exe","4321","Console","1","100 K"', 4321), true);
   assert.equal(
     tasklistHasPid('INFO: No tasks are running which match the specified criteria.', 4321),
     false,
   );
+});
+
+test('proc net listeners decode loopback and a public bind', () => {
+  const text = [
+    '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode',
+    '   0: 0100007F:9935 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 12345 1 0000000000000000 100 0 0 10 0',
+    '   1: 00000000:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 999 1 0000000000000000 100 0 0 10 0',
+    '   2: 00000000000000000000000001000000:1F90 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000 0 0 42 1 0000000000000000 100 0 0 10 0',
+  ].join('\n');
+  const rows = parseProcNet(text);
+  assert.deepEqual(rows, [
+    { address: '127.0.0.1', port: 39221, inode: 12345 },
+    { address: '0.0.0.0', port: 80, inode: 999 },
+    { address: '::1', port: 8080, inode: 42 },
+  ]);
+  assert.equal(
+    classifyListeners([{ address: '0.0.0.0', port: 80, pid: 4 }], new Set([4])).state,
+    'exposed',
+  );
+});
+
+test('a linux install is the music binary next to app.asar', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ym-linux-client-'));
+  assert.equal(linuxClientCandidate(root), null);
+  fs.mkdirSync(path.join(root, 'resources'));
+  fs.writeFileSync(path.join(root, 'yandexmusic'), '');
+  fs.writeFileSync(path.join(root, 'resources', 'app.asar'), '');
+  const candidate = linuxClientCandidate(root);
+  assert.equal(candidate.displayName, 'Яндекс Музыка');
+  assert.equal(candidate.exe, path.join(root, 'yandexmusic'));
+  assert.equal(candidate.asar, path.join(root, 'resources', 'app.asar'));
+  const dirs = linuxInstallDirs({ HOME: '/home/a' });
+  assert.ok(dirs.includes('/opt/Яндекс Музыка'));
+  assert.ok(dirs.includes('/home/a/.local/opt/Яндекс Музыка'));
+});
+
+test('linux debug flags stay on loopback and skip no-sandbox when the helper is setuid', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ym-sandbox-'));
+  const exe = path.join(dir, 'yandexmusic');
+  fs.writeFileSync(exe, '');
+  fs.writeFileSync(path.join(dir, 'chrome-sandbox'), '');
+  fs.chmodSync(path.join(dir, 'chrome-sandbox'), 0o755);
+  assert.equal(chromeSandboxMode(exe), 'no-setuid');
+  fs.chmodSync(path.join(dir, 'chrome-sandbox'), 0o4755);
+  assert.equal(chromeSandboxMode(exe), 'setuid');
+  const plain = linuxDebugExtras(exe, { sandboxMode: () => 'setuid', userDataDir: '/tmp/ym-profile' });
+  assert.deepEqual(plain, [
+    '--gtk-version=3',
+    '--user-data-dir=/tmp/ym-profile',
+  ]);
+  const open = linuxDebugExtras(exe, { sandboxMode: () => 'no-setuid', userDataDir: '/tmp/ym-profile' });
+  assert.equal(open.includes('--no-sandbox'), true);
+  assert.equal(open.some((arg) => arg.includes('0.0.0.0')), false);
 });
 
 test('page discovery retries when the debug list is not ready yet', async () => {
@@ -625,14 +917,14 @@ test('an unidentified listener is not described as a foreign process', () => {
   assert.equal(text.includes('не из этого запуска'), false);
 });
 
-test('linux execution does not search, read or spawn the client', async () => {
+test('darwin execution does not search, read or spawn the client', async () => {
   let called = false;
   const boom = () => {
     called = true;
     throw new Error('should not touch the client');
   };
   const result = await executeProbe(
-    { platform: 'linux' },
+    { platform: 'darwin' },
     {
       findClient: boom,
       readFuses: boom,
@@ -645,6 +937,26 @@ test('linux execution does not search, read or spawn the client', async () => {
   assert.equal(result.exitCode, 2);
   assert.match(result.markdown, /не запускался/);
   assert.match(result.markdown, /не проверено/);
+});
+
+test('linux execution stops before spawn when no client is installed', async () => {
+  let spawned = false;
+  const result = await executeProbe(
+    { platform: 'linux' },
+    {
+      findClient: async () => ({ ambiguous: false, client: null }),
+      spawnDebugClient: async () => {
+        spawned = true;
+      },
+      inspectPage: async () => {
+        spawned = true;
+      },
+    },
+  );
+  assert.equal(spawned, false);
+  assert.equal(result.exitCode, 2);
+  assert.match(result.markdown, /не найден/);
+  assert.match(result.markdown, /не проверка Windows 11/);
 });
 
 test('an already running client is not killed or relaunched', async () => {
@@ -685,6 +997,59 @@ test('an already running client is not killed or relaunched', async () => {
   assert.equal(result.exitCode, 2);
   assert.match(result.markdown, /OnlyLoadAppFromAsar/);
   assert.match(result.markdown, /не проверено/);
+});
+
+test('linux launch keeps the debug port on loopback and records container flags', async () => {
+  const launches = [];
+  const base = {
+    findClient: async () => ({
+      ambiguous: false,
+      client: {
+        exe: '/opt/Яндекс Музыка/yandexmusic',
+        asar: '/opt/Яндекс Музыка/resources/app.asar',
+        source: 'known-path',
+        displayName: 'Яндекс Музыка',
+        running: false,
+      },
+    }),
+    readFuses: async () => ({ found: false, wires: [] }),
+    hashFile: async () => 'same',
+    readVersions: async () => ({ asar: '5.121.2', exe: null, updateFeed: null }),
+    loadBaseline: async () => null,
+    reservePort: async () => 43123,
+    userDataDir: '/tmp/ym-skins-probe-profile',
+    spawnDebugClient: async (spec) => {
+      launches.push(spec);
+      return {
+        pid: 5,
+        port: spec.port,
+        close: async () => {},
+      };
+    },
+    assertLoopback: async () => ({ ok: false, reason: 'timeout' }),
+    inspectPage: async () => {
+      throw new Error('page should stay untouched');
+    },
+  };
+  const open = await executeProbe(
+    { platform: 'linux' },
+    { ...base, sandboxMode: () => 'no-setuid' },
+  );
+  assert.equal(open.exitCode, 1);
+  assert.equal(launches.length, 1);
+  assert.equal(launches[0].args.includes('--remote-debugging-address=127.0.0.1'), true);
+  assert.equal(launches[0].args.includes('--gtk-version=3'), true);
+  assert.equal(launches[0].args.includes('--no-sandbox'), true);
+  assert.equal(launches[0].args.includes('--user-data-dir=/tmp/ym-skins-probe-profile'), true);
+  assert.equal(launches[0].args.some((arg) => arg.includes('0.0.0.0')), false);
+  assert.match(open.markdown, /отладочный порт не открылся/);
+  const sealed = await executeProbe(
+    { platform: 'linux' },
+    { ...base, sandboxMode: () => 'setuid' },
+  );
+  assert.equal(sealed.exitCode, 1);
+  assert.equal(launches[1].args.includes('--no-sandbox'), false);
+  assert.equal(launches[1].args.includes('--gtk-version=3'), true);
 });
 
 test('a public debug port is closed and the page is not touched', async () => {
@@ -863,7 +1228,7 @@ function computed(el) {
   return { backgroundColor: 'rgb(0, 0, 0)', display: 'block' };
 }
 
-function fakeDocument({ body, head, buttons = [], navs = [] }) {
+function fakeDocument({ body, head, buttons = [], navs = [], extras = [] }) {
   const nodes = new Map();
   const doc = {
     body,
@@ -880,7 +1245,10 @@ function fakeDocument({ body, head, buttons = [], navs = [] }) {
     querySelector(selector) {
       if (selector === 'button') return buttons[0] || null;
       const testId = selector.match(/^\[data-test-id="([A-Za-z0-9_.:-]{1,80})"\]$/);
-      if (testId) return buttons.find((button) => button.attrs['data-test-id'] === testId[1]) || null;
+      if (testId) {
+        const navChildren = navs.flatMap((nav) => [nav, ...(nav.children || [])]);
+        return [...buttons, ...extras, ...navChildren].find((node) => node.attrs['data-test-id'] === testId[1]) || null;
+      }
       if (selector === '[data-yms-poc="button"]') {
         return buttons.find((button) => button.attrs['data-yms-poc'] === 'button') || null;
       }
