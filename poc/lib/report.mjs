@@ -88,6 +88,9 @@ function injectionSection(facts) {
     if (facts.launch.reason === 'foreign') {
       return 'Порт на 127.0.0.1 открыл процесс не из этого запуска. Страница не внедрялась.';
     }
+    if (facts.launch.reason === 'unconfirmed') {
+      return 'На 127.0.0.1 открыт порт, но его процесс не сопоставлен с запущенным клиентом. Страница не внедрялась. Способ внедрения не проверено.';
+    }
     if (facts.launch.reason === 'no-http') {
       return 'Порт на 127.0.0.1 слушает запущенный процесс, но отладчик не ответил. Страница не внедрялась. Способ внедрения не проверено.';
     }
@@ -196,6 +199,9 @@ function surfaceSection(surface) {
     `Кнопка до внедрения: ${surface.buttonFound ? surface.originalButton || 'не проверено' : 'не найдена, не проверено'}.`,
     `Кнопка после внедрения: ${surface.buttonFound ? surface.styledButton || 'не проверено' : 'не найдена, не проверено'}.`,
   ];
+  if (typeof surface.buttonTestId === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(surface.buttonTestId)) {
+    lines.push(`Кнопка выбрана по data-test-id: ${surface.buttonTestId}.`);
+  }
   if (surface.absentAfterRestart && surface.restoredAfterReinject) {
     lines.push('После перезапуска, до повторного внедрения, стиль в странице отсутствовал. Повторное внедрение вернуло тот же фон и ту же кнопку.');
   } else if (surface.absentAfterRestart === false) {

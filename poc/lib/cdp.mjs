@@ -2,9 +2,9 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import net from 'node:net';
 
-import { analyserProbe, applySurface, menuProbe, readSurface, removeSurface } from './page.mjs';
+import { analyserProbe, applySurface, menuProbe, pageExpression, readSurface, removeSurface } from './page.mjs';
 import { auditExpression, pickPageTarget } from './plan.mjs';
-import { decodeFrames, encodeTextFrame } from './ws.mjs';
+import { decodeFrames, encodeControlFrame, encodeTextFrame } from './ws.mjs';
 
 const ALLOWED = new Set([
   'Runtime.enable',
@@ -67,6 +67,7 @@ export function connectCdp(wsUrl) {
     let buffer = Buffer.alloc(0);
     let established = false;
     const pending = new Map();
+    const frameState = { fragments: [] };
     let nextId = 0;
     const fail = (error) => {
       socket.destroy();
@@ -112,8 +113,9 @@ export function connectCdp(wsUrl) {
         established = true;
         resolve(session);
       }
-      const decoded = decodeFrames(buffer);
+      const decoded = decodeFrames(buffer, frameState);
       buffer = Buffer.from(decoded.rest);
+      for (const ping of decoded.pings) socket.write(encodeControlFrame(0xA, ping));
       for (const message of decoded.messages) {
         let parsed;
         try {
@@ -133,42 +135,33 @@ export function connectCdp(wsUrl) {
 }
 
 export async function inspectPage({ port, apply }) {
-  const picked = await waitForPage(port);
-  if (!picked.webSocketDebuggerUrl) {
-    return {
-      pageFound: false,
-      background: null,
-      buttonBackground: null,
-      buttonFound: false,
-      stylePresent: false,
-      heldInSession: false,
-      analyser: null,
-      menu: null,
-    };
-  }
-  const cdp = await connectCdp(picked.webSocketDebuggerUrl);
-  try {
-    await cdp.send('Runtime.enable');
-    if (!apply) {
-      const surface = await readSurfaceWhenReady(cdp);
-      return {
-        pageFound: true,
-        background: surface?.background || null,
-        buttonBackground: surface?.buttonBackground || null,
-        buttonFound: Boolean(surface?.buttonFound),
-        buttonTestId: safeTestId(surface?.buttonTestId),
-        stylePresent: Boolean(surface?.stylePresent),
-        heldInSession: false,
-        analyser: null,
-        menu: null,
-      };
+  const deadline = Date.now() + 30000;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    const timeoutMs = Math.min(5000, deadline - Date.now());
+    if (timeoutMs <= 0) break;
+    const picked = await waitForPage(port, timeoutMs);
+    if (!picked.webSocketDebuggerUrl) continue;
+    let cdp;
+    try {
+      cdp = await connectCdp(picked.webSocketDebuggerUrl);
+      return await readApplied(cdp, apply);
+    } catch (error) {
+      if (String(error?.message || '').includes('expression blocked')) throw error;
+      lastError = error;
+      await delay(400);
+    } finally {
+      if (cdp) cdp.close();
     }
-    await readSurfaceWhenReady(cdp);
-    await evaluate(cdp, documentCall(applySurface));
-    await delay(1500);
-    const surface = await evaluate(cdp, documentCall(readSurface));
-    const audio = await evaluate(cdp, `(${analyserProbe.toString()})(globalThis)`);
-    const menu = await evaluate(cdp, documentCall(menuProbe));
+  }
+  if (lastError) throw lastError;
+  return emptyPage();
+}
+
+async function readApplied(cdp, apply) {
+  await cdp.send('Runtime.enable');
+  if (!apply) {
+    const surface = await readSurfaceWhenReady(cdp);
     return {
       pageFound: true,
       background: surface?.background || null,
@@ -176,18 +169,46 @@ export async function inspectPage({ port, apply }) {
       buttonFound: Boolean(surface?.buttonFound),
       buttonTestId: safeTestId(surface?.buttonTestId),
       stylePresent: Boolean(surface?.stylePresent),
-      heldInSession: Boolean(surface?.stylePresent),
-      analyser: {
-        hasAudioContextCtor: Boolean(audio?.hasAudioContextCtor),
-        hasAnalyserNode: Boolean(audio?.hasAnalyserNode),
-        liveContexts: await countAudioContexts(cdp),
-        spectrumRead: false,
-      },
-      menu,
+      heldInSession: false,
+      analyser: null,
+      menu: null,
     };
-  } finally {
-    cdp.close();
   }
+  await readSurfaceWhenReady(cdp);
+  await evaluate(cdp, documentCall(applySurface));
+  await delay(1500);
+  const surface = await evaluate(cdp, documentCall(readSurface));
+  const audio = await evaluate(cdp, `(${analyserProbe.toString()})(globalThis)`);
+  const menu = await evaluate(cdp, documentCall(menuProbe));
+  return {
+    pageFound: true,
+    background: surface?.background || null,
+    buttonBackground: surface?.buttonBackground || null,
+    buttonFound: Boolean(surface?.buttonFound),
+    buttonTestId: safeTestId(surface?.buttonTestId),
+    stylePresent: Boolean(surface?.stylePresent),
+    heldInSession: Boolean(surface?.stylePresent),
+    analyser: {
+      hasAudioContextCtor: Boolean(audio?.hasAudioContextCtor),
+      hasAnalyserNode: Boolean(audio?.hasAnalyserNode),
+      liveContexts: await countAudioContexts(cdp),
+      spectrumRead: false,
+    },
+    menu,
+  };
+}
+
+function emptyPage() {
+  return {
+    pageFound: false,
+    background: null,
+    buttonBackground: null,
+    buttonFound: false,
+    stylePresent: false,
+    heldInSession: false,
+    analyser: null,
+    menu: null,
+  };
 }
 
 export async function restoreSurface(port) {
@@ -197,23 +218,39 @@ export async function restoreSurface(port) {
   const cdp = await connectCdp(picked.webSocketDebuggerUrl);
   try {
     await cdp.send('Runtime.enable');
-    const removed = await evaluate(cdp, `(${removeSurfaceSource()})(document)`);
+    const removed = await evaluate(cdp, pageExpression(removeSurface));
     return Boolean(removed);
   } finally {
     cdp.close();
   }
 }
 
-async function waitForPage(port) {
-  const deadline = Date.now() + 20000;
+export async function waitForPageTarget({
+  fetchJson,
+  sleep,
+  now = Date.now,
+  timeoutMs = 20000,
+}) {
+  const start = now();
   let picked = { webSocketDebuggerUrl: null, pageCount: 0 };
-  while (Date.now() < deadline) {
-    const list = await fetchLoopbackJson(port, '/json/list');
-    picked = pickPageTarget(list);
-    if (picked.webSocketDebuggerUrl) return picked;
-    await delay(400);
+  while (now() - start < timeoutMs) {
+    try {
+      picked = pickPageTarget(await fetchJson());
+      if (picked.webSocketDebuggerUrl) return picked;
+    } catch {
+      // The debug port can accept a connection before /json/list answers.
+    }
+    await sleep();
   }
   return picked;
+}
+
+async function waitForPage(port, timeoutMs) {
+  return waitForPageTarget({
+    timeoutMs,
+    sleep: () => delay(400),
+    fetchJson: () => fetchLoopbackJson(port, '/json/list'),
+  });
 }
 
 async function readSurfaceWhenReady(cdp) {
@@ -227,11 +264,7 @@ async function readSurfaceWhenReady(cdp) {
 }
 
 function documentCall(fn) {
-  return `(${fn.toString()})(document, getComputedStyle)`;
-}
-
-function removeSurfaceSource() {
-  return removeSurface.toString();
+  return pageExpression(fn);
 }
 
 async function evaluate(cdp, expression) {

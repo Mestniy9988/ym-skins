@@ -112,6 +112,7 @@ export async function executeProbe(env, deps) {
     originalButton: original?.buttonBackground || null,
     styledButton: styled?.buttonBackground || null,
     buttonFound: Boolean(styled?.buttonFound),
+    buttonTestId: styled?.buttonTestId || null,
     heldInSession: Boolean(styled?.heldInSession && styled?.stylePresent),
     absentAfterRestart: Boolean(afterRestart)
       && afterRestart.stylePresent === false
@@ -155,7 +156,7 @@ async function launchChecked(client, deps) {
   const port = deps.reservePort ? await deps.reservePort() : 0;
   const args = buildLaunchArgs(port);
   const handle = await deps.spawnDebugClient({ exe: client.exe, args, port });
-  const loopback = await deps.assertLoopback(handle.pid, handle.port ?? port);
+  const loopback = await deps.assertLoopback(handle.pid, handle.port ?? port, client.exe);
   const opened = loopback === true || loopback?.ok === true;
   if (!opened) {
     await handle.close();

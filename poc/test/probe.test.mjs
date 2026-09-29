@@ -6,7 +6,9 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { readRootPackage, writeFixtureAsar } from '../lib/asar-meta.mjs';
+import { waitForPageTarget } from '../lib/cdp.mjs';
 import { executeProbe } from '../lib/execute.mjs';
+import { clientSpawnOptions, tasklistHasPid } from '../lib/launch.mjs';
 import {
   FUSE_SENTINEL,
   FUSE_V1_NAMES,
@@ -17,6 +19,7 @@ import {
   MUSIC_EXE_NAMES,
   chooseClient,
   exeFromDisplayIcon,
+  installFolders,
   isMusicDisplayName,
   knownInstallDirs,
 } from '../lib/find-client.mjs';
@@ -26,6 +29,8 @@ import {
   analyserProbe,
   applySurface,
   menuProbe,
+  pageExpression,
+  pickButton,
   readSurface,
   removeSurface,
 } from '../lib/page.mjs';
@@ -41,7 +46,7 @@ import {
 } from '../lib/plan.mjs';
 import { buildReport } from '../lib/report.mjs';
 import { compareSnapshots } from '../lib/snapshot.mjs';
-import { decodeFrames, encodeTextFrame } from '../lib/ws.mjs';
+import { decodeFrames, encodeControlFrame, encodeTextFrame } from '../lib/ws.mjs';
 
 test('fuse wire names integrity and inspect flags without guessing past the wire', () => {
   const states = [0x30, 0x31, 0x30, 0x31, 0x31, 0x30, 0x31, 0x30, 0x72];
@@ -131,6 +136,7 @@ test('asar header yields only the root package version and name', () => {
 test('client discovery prefers a registry music install and ignores the browser', () => {
   assert.equal(isMusicDisplayName('Яндекс Музыка'), true);
   assert.equal(isMusicDisplayName('Yandex Music'), true);
+  assert.equal(isMusicDisplayName('Yandex.Music'), true);
   assert.equal(isMusicDisplayName('Yandex Browser'), false);
   assert.equal(
     exeFromDisplayIcon('"C:\\Users\\a\\AppData\\Local\\Programs\\YandexMusic\\YandexMusic.exe",0'),
@@ -141,6 +147,11 @@ test('client discovery prefers a registry music install and ignores the browser'
     ProgramFiles: 'C:\\Program Files',
   });
   assert.ok(dirs.some((dir) => dir.endsWith('\\Programs\\YandexMusic')));
+  assert.ok(dirs.some((dir) => dir.endsWith('\\Programs\\Yandex.Music')));
+  assert.deepEqual(
+    installFolders('C:\\YM', ['locales', 'app-5.1.0', 'app-5.121.2', 'app-cache']),
+    ['C:\\YM', 'C:\\YM\\app-5.121.2', 'C:\\YM\\app-5.1.0'],
+  );
   const chosen = chooseClient([
     {
       exe: 'C:\\Program Files\\Yandex\\YandexBrowser\\Application\\browser.exe',
@@ -232,6 +243,33 @@ test('a missing debug port is not described as a public listener', () => {
     classifyListeners([{ address: '127.0.0.1', port: 1, pid: 9 }], new Set([4])).state,
     'foreign',
   );
+  assert.equal(
+    classifyListeners(
+      [{ address: '127.0.0.1', port: 1, pid: 9 }],
+      new Set([4]),
+      new Map([[9, 'C:\\YM\\YandexMusic.exe']]),
+      'C:\\YM\\YandexMusic.exe',
+    ).state,
+    'loopback',
+  );
+  assert.equal(
+    classifyListeners(
+      [{ address: '127.0.0.1', port: 1, pid: 9 }],
+      new Set([4]),
+      new Map([[9, 'C:\\Windows\\System32\\svchost.exe']]),
+      'C:\\YM\\YandexMusic.exe',
+    ).state,
+    'foreign',
+  );
+  assert.equal(
+    classifyListeners(
+      [{ address: '127.0.0.1', port: 1, pid: 9 }],
+      new Set([4]),
+      new Map(),
+      'C:\\YM\\YandexMusic.exe',
+    ).state,
+    'unknown',
+  );
   assert.ok(MUSIC_EXE_NAMES.includes('Яндекс Музыка.exe'));
 });
 
@@ -308,6 +346,20 @@ test('page target drops titles, query strings and non-loopback sockets', () => {
     },
   ]);
   assert.equal(blank.webSocketDebuggerUrl, 'ws://127.0.0.1:9/devtools/page/APP');
+  const errorPage = pickPageTarget([
+    {
+      type: 'page',
+      url: 'chrome-error://chromewebdata/',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:9/devtools/page/ERR',
+    },
+    {
+      type: 'page',
+      url: 'file:///app/index.html',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:9/devtools/page/APP',
+    },
+  ]);
+  assert.equal(errorPage.webSocketDebuggerUrl, 'ws://127.0.0.1:9/devtools/page/APP');
+  assert.equal(errorPage.pageCount, 1);
 });
 
 test('page scripts change one button and the background and do not touch storage', () => {
@@ -330,8 +382,8 @@ test('page scripts change one button and the background and do not touch storage
   assert.equal(readSurface(doc, computed).stylePresent, false);
   assert.equal(button.attrs['data-yms-poc'], undefined);
 
-  const sources = [readSurface, applySurface, removeSurface, analyserProbe, menuProbe]
-    .map((fn) => fn.toString())
+  const sources = [readSurface, applySurface, removeSurface, analyserProbe, menuProbe, pickButton]
+    .map((fn) => pageExpression(fn))
     .join('\n');
   assert.equal(auditExpression(sources), null);
   const audio = analyserProbe({
@@ -340,6 +392,24 @@ test('page scripts change one button and the background and do not touch storage
   });
   assert.equal(audio.hasAnalyserNode, true);
   assert.equal(audio.spectrumRead, false);
+});
+
+test('the play control is styled by its test id, not by a marker attribute', () => {
+  const plain = element('button');
+  const play = element('button');
+  play.attrs['data-test-id'] = 'PLAY_BUTTON';
+  const body = element('body');
+  const doc = fakeDocument({ body, head: element('head'), buttons: [plain, play] });
+  applySurface(doc, computed);
+  const after = readSurface(doc, computed);
+  assert.equal(after.buttonTestId, 'PLAY_BUTTON');
+  assert.equal(after.buttonBackground, POC_BUTTON);
+  assert.equal(after.background, POC_BACKGROUND);
+  assert.equal(plain.attrs['data-yms-poc'], undefined);
+  assert.equal(play.attrs['data-yms-poc'], undefined);
+  assert.equal(doc.styleText.includes('[data-test-id="PLAY_BUTTON"]'), true);
+  removeSurface(doc);
+  assert.equal(readSurface(doc, computed).stylePresent, false);
 });
 
 test('menu probe hides one node and puts the page back', () => {
@@ -470,9 +540,75 @@ test('snapshot comparison does not invent an update', () => {
 test('websocket text frames round-trip', () => {
   const payload = JSON.stringify({ id: 1, method: 'Runtime.evaluate' });
   const frame = encodeTextFrame(payload);
-  const { messages, rest } = decodeFrames(frame);
+  const { messages, pings, rest } = decodeFrames(frame);
   assert.deepEqual(messages, [payload]);
+  assert.deepEqual(pings, []);
   assert.equal(rest.length, 0);
+});
+
+test('a split text frame is joined and a ping is answered with a masked pong', () => {
+  const state = { fragments: [] };
+  const head = Buffer.from([0x01, 5, ...Buffer.from('{"id"')]);
+  const tail = Buffer.from([0x80, 3, ...Buffer.from(':1}')]);
+  const first = decodeFrames(head, state);
+  assert.deepEqual(first.messages, []);
+  const second = decodeFrames(tail, state);
+  assert.deepEqual(second.messages, ['{"id":1}']);
+  const ping = Buffer.from([0x89, 1, 0x7a]);
+  const decoded = decodeFrames(ping);
+  assert.equal(decoded.pings[0].toString(), 'z');
+  const pong = encodeControlFrame(0xA, decoded.pings[0]);
+  assert.equal(pong[0], 0x8A);
+  assert.equal(pong[1] & 0x80, 0x80);
+  const back = decodeFrames(pong);
+  assert.equal(back.messages.length, 0);
+  assert.equal(back.pings.length, 0);
+});
+
+test('the client process is detached and a tasklist row identifies its pid', () => {
+  const options = clientSpawnOptions('C:\\YM\\YandexMusic.exe');
+  assert.equal(options.detached, true);
+  assert.equal(options.stdio, 'ignore');
+  assert.equal(options.cwd, 'C:\\YM');
+  assert.equal(tasklistHasPid('"YandexMusic.exe","4321","Console","1","100 K"', 4321), true);
+  assert.equal(
+    tasklistHasPid('INFO: No tasks are running which match the specified criteria.', 4321),
+    false,
+  );
+});
+
+test('page discovery retries when the debug list is not ready yet', async () => {
+  let clock = 0;
+  let calls = 0;
+  const picked = await waitForPageTarget({
+    now: () => clock,
+    sleep: async () => {
+      clock += 500;
+    },
+    timeoutMs: 2000,
+    fetchJson: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('connection reset');
+      return [{
+        type: 'page',
+        url: 'file:///app/index.html',
+        webSocketDebuggerUrl: 'ws://127.0.0.1:9/devtools/page/APP',
+      }];
+    },
+  });
+  assert.equal(calls, 2);
+  assert.equal(picked.webSocketDebuggerUrl, 'ws://127.0.0.1:9/devtools/page/APP');
+});
+
+test('an unidentified listener is not described as a foreign process', () => {
+  const text = buildReport({
+    platform: 'win32',
+    decision: 'launch',
+    launch: { port: 43123, loopback: false, reason: 'unconfirmed' },
+  });
+  assert.match(text, /не сопоставлен/);
+  assert.match(text, /не внедр/);
+  assert.equal(text.includes('не из этого запуска'), false);
 });
 
 test('linux execution does not search, read or spawn the client', async () => {
@@ -698,7 +834,14 @@ function computed(el) {
   if (el.tag === 'body' && el.owner && el.owner.styleText.includes(POC_BACKGROUND)) {
     return { backgroundColor: POC_BACKGROUND, display: 'block' };
   }
-  if (el.attrs['data-yms-poc'] === 'button' && el.owner && el.owner.styleText.includes(POC_BUTTON)) {
+  const testId = el.attrs['data-test-id'];
+  const styledByTestId = Boolean(
+    testId
+    && el.owner?.styleText.includes(`[data-test-id="${testId}"]`)
+    && el.owner.styleText.includes(POC_BUTTON),
+  );
+  const styledByMarker = el.attrs['data-yms-poc'] === 'button' && el.owner?.styleText.includes(POC_BUTTON);
+  if (styledByTestId || styledByMarker) {
     return { backgroundColor: POC_BUTTON, display: el.style.display || 'inline-block' };
   }
   if (el.style.display) return { backgroundColor: 'rgb(1, 1, 1)', display: el.style.display };
@@ -722,6 +865,8 @@ function fakeDocument({ body, head, buttons = [], navs = [] }) {
     },
     querySelector(selector) {
       if (selector === 'button') return buttons[0] || null;
+      const testId = selector.match(/^\[data-test-id="([A-Za-z0-9_.:-]{1,80})"\]$/);
+      if (testId) return buttons.find((button) => button.attrs['data-test-id'] === testId[1]) || null;
       if (selector === '[data-yms-poc="button"]') {
         return buttons.find((button) => button.attrs['data-yms-poc'] === 'button') || null;
       }

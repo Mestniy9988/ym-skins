@@ -59,13 +59,30 @@ export function bindIsLoopback(rows, port, pid) {
   return mine.every((row) => row.address === '127.0.0.1' || row.address === '::1');
 }
 
-export function classifyListeners(rows, pids) {
+export function sameExePath(left, right) {
+  const norm = (value) => String(value || '')
+    .replace(/^\\\\\?\\/, '')
+    .replace(/\//g, '\\')
+    .replace(/\\+$/, '')
+    .toLowerCase();
+  if (!norm(left) || !norm(right)) return false;
+  return norm(left) === norm(right);
+}
+
+export function classifyListeners(rows, pids, imageByPid = null, exe = '') {
   if (!rows?.length) return { state: 'absent' };
   if (rows.some((row) => row.address !== '127.0.0.1' && row.address !== '::1')) {
     return { state: 'exposed' };
   }
-  const owned = pids instanceof Set ? pids : new Set(pids);
-  if (rows.some((row) => !owned.has(row.pid))) return { state: 'foreign' };
+  const owned = pids instanceof Set ? pids : new Set(pids || []);
+  for (const row of rows) {
+    if (owned.has(row.pid)) continue;
+    if (!imageByPid) return { state: 'foreign' };
+    const image = imageByPid.get(row.pid);
+    if (image && sameExePath(image, exe)) continue;
+    if (image) return { state: 'foreign' };
+    return { state: 'unknown' };
+  }
   return { state: 'loopback' };
 }
 
@@ -83,7 +100,7 @@ export function pickPageTarget(targets) {
     }
     if (socketUrl.protocol !== 'ws:' && socketUrl.protocol !== 'wss:') continue;
     if (socketUrl.hostname !== '127.0.0.1' && socketUrl.hostname !== 'localhost') continue;
-    if (pageUrl.protocol === 'devtools:') continue;
+    if (pageUrl.protocol === 'devtools:' || pageUrl.protocol === 'chrome:' || pageUrl.protocol === 'chrome-error:') continue;
     if (pageUrl.href === 'about:blank' || pageUrl.href.startsWith('about:blank')) continue;
     pages.push({
       webSocketDebuggerUrl: target.webSocketDebuggerUrl,

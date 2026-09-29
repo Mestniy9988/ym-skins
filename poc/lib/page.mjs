@@ -1,9 +1,19 @@
 export const POC_BACKGROUND = 'rgb(58, 24, 72)';
 export const POC_BUTTON = 'rgb(232, 255, 71)';
 
+export function pickButton(document) {
+  return document.querySelector('[data-test-id="PLAY_BUTTON"]')
+    || document.querySelector('[data-yms-poc="button"]')
+    || document.querySelector('button');
+}
+
+export function pageExpression(fn) {
+  return `(() => {\n${pickButton.toString()}\nreturn (${fn.toString()})(document, getComputedStyle);\n})()`;
+}
+
 export function readSurface(document, getComputedStyle) {
   const body = document.body;
-  const button = document.querySelector('button');
+  const button = pickButton(document);
   return {
     background: body ? getComputedStyle(body).backgroundColor : null,
     buttonFound: Boolean(button),
@@ -20,11 +30,18 @@ export function applySurface(document, getComputedStyle) {
     style.id = 'ym-skins-poc';
     (document.head || document.documentElement).appendChild(style);
   }
-  const button = document.querySelector('button');
-  if (button) button.setAttribute('data-yms-poc', 'button');
+  const button = pickButton(document);
+  const testId = button ? button.getAttribute('data-test-id') : null;
+  let buttonRule = '';
+  if (testId && /^[A-Za-z0-9_.:-]{1,80}$/.test(testId)) {
+    buttonRule = `[data-test-id="${testId}"] { background-color: ${POC_BUTTON} !important; }`;
+  } else if (button) {
+    button.setAttribute('data-yms-poc', 'button');
+    buttonRule = `[data-yms-poc="button"] { background-color: ${POC_BUTTON} !important; }`;
+  }
   style.textContent = [
     `html, body { background-color: ${POC_BACKGROUND} !important; }`,
-    `[data-yms-poc="button"] { background-color: ${POC_BUTTON} !important; }`,
+    buttonRule,
   ].join('\n');
   return readSurface(document, getComputedStyle);
 }

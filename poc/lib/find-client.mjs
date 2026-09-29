@@ -4,7 +4,7 @@ import path from 'node:path';
 
 export function isMusicDisplayName(name) {
   if (!name) return false;
-  return /яндекс\s*музыка|yandex\s*music|yandexmusic/i.test(name);
+  return /яндекс[\s.]*музыка|yandex[\s.]*music|yandexmusic/i.test(name);
 }
 
 export function exeFromDisplayIcon(icon) {
@@ -27,12 +27,23 @@ export function knownInstallDirs(env) {
   const programFilesX86 = env['ProgramFiles(x86)'];
   if (local) {
     dirs.push(path.win32.join(local, 'Programs', 'YandexMusic'));
+    dirs.push(path.win32.join(local, 'Programs', 'Yandex.Music'));
     dirs.push(path.win32.join(local, 'YandexMusic'));
     dirs.push(path.win32.join(local, 'Programs', 'Yandex Music'));
   }
-  if (programFiles) dirs.push(path.win32.join(programFiles, 'YandexMusic'));
+  if (programFiles) {
+    dirs.push(path.win32.join(programFiles, 'YandexMusic'));
+    dirs.push(path.win32.join(programFiles, 'Yandex.Music'));
+  }
   if (programFilesX86) dirs.push(path.win32.join(programFilesX86, 'YandexMusic'));
   return dirs;
+}
+
+export function installFolders(root, childNames) {
+  const versions = (childNames || [])
+    .filter((name) => /^app-\d[\w.-]*$/.test(name))
+    .sort((left, right) => right.localeCompare(left, 'en', { numeric: true }));
+  return [root, ...versions.map((name) => path.win32.join(root, name))];
 }
 
 export function chooseClient(candidates) {
@@ -158,11 +169,21 @@ export async function findInstalledClient() {
 export const MUSIC_EXE_NAMES = ['YandexMusic.exe', 'Yandex Music.exe', 'Яндекс Музыка.exe'];
 
 function exeInDir(dir) {
-  if (!dir || typeof dir !== 'string') return null;
-  const names = MUSIC_EXE_NAMES;
-  for (const name of names) {
-    const candidate = path.win32.join(dir, name);
-    if (fs.existsSync(candidate)) return candidate;
+  if (!dir || typeof dir !== 'string' || !fs.existsSync(dir)) return null;
+  let children = [];
+  try {
+    children = fs.readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch {
+    children = [];
+  }
+  for (const folder of installFolders(dir, children)) {
+    for (const name of MUSIC_EXE_NAMES) {
+      const exe = path.win32.join(folder, name);
+      const asar = path.win32.join(folder, 'resources', 'app.asar');
+      if (fs.existsSync(exe) && fs.existsSync(asar)) return exe;
+    }
   }
   return null;
 }
