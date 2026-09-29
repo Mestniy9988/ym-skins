@@ -7,6 +7,8 @@ import test from 'node:test';
 import vm from 'node:vm';
 
 import { findAudioGraphMarkers } from '../lib/audio-graph.mjs';
+import { classifyLoopback } from '../lib/loopback.mjs';
+import { selectorMapFor } from '../lib/selector-map.mjs';
 import { readRootPackage, writeFixtureAsar } from '../lib/asar-meta.mjs';
 import { waitForPageTarget } from '../lib/cdp.mjs';
 import { executeProbe } from '../lib/execute.mjs';
@@ -442,15 +444,18 @@ test('the play control is styled by its test id, not by a marker attribute', () 
   assert.equal(readSurface(doc, computed).stylePresent, false);
 });
 
-test('menu probe hides one node and puts the page back', () => {
+test('menu probe hides one known nav item and puts the page back', () => {
   const item = element('a');
   item.style.display = 'block';
+  item.attrs['data-test-id'] = 'NAVBAR_NAVIGATION_ITEM_KIDS';
   const nav = element('nav');
   nav.children.push(item);
   const body = element('body');
   const doc = fakeDocument({ body, head: element('head'), navs: [nav] });
   const result = menuProbe(doc, computed);
   assert.equal(result.navCount, 1);
+  assert.equal(result.hideTried, true);
+  assert.equal(result.hiddenTestId, 'NAVBAR_NAVIGATION_ITEM_KIDS');
   assert.equal(result.hideApplied, true);
   assert.equal(result.hideReverted, true);
   assert.equal(result.settingsPageOpened, false);
@@ -459,7 +464,19 @@ test('menu probe hides one node and puts the page back', () => {
   assert.equal(result.settingsListFound, false);
   assert.equal(result.regionScreen, false);
   assert.equal(item.style.display, 'block');
+  assert.equal(item.attrs['data-yms-poc-hide'], undefined);
   assert.equal(doc.getElementById('ym-skins-poc-settings-probe'), null);
+});
+
+test('menu probe does not hide an unnamed nav child', () => {
+  const item = element('a');
+  item.style.display = 'block';
+  const nav = element('nav');
+  nav.children.push(item);
+  const doc = fakeDocument({ body: element('body'), head: element('head'), navs: [nav] });
+  const result = menuProbe(doc, computed);
+  assert.equal(result.hideTried, false);
+  assert.equal(item.style.display, 'block');
 });
 
 test('region screen is recorded and a navbar test id is visible to the probe', () => {
@@ -479,19 +496,41 @@ test('region screen is recorded and a navbar test id is visible to the probe', (
 test('analyser peaks come from existing nodes only', () => {
   const loud = [{
     frequencyBinCount: 4,
+    fftSize: 32,
+    context: { state: 'running' },
     getByteFrequencyData(bins) {
       bins.set([0, 12, 3, 0]);
     },
   }];
-  assert.deepEqual(readAnalyserPeaks.call(loud), { count: 1, peak: 12 });
+  assert.deepEqual(readAnalyserPeaks.call(loud), { count: 1, peak: 12, running: 1, fftSize: 32 });
   const quiet = [{
     frequencyBinCount: 2,
+    fftSize: 32,
+    context: { state: 'suspended' },
     getByteFrequencyData(bins) {
       bins.fill(0);
     },
   }];
-  assert.deepEqual(readAnalyserPeaks.call(quiet), { count: 1, peak: 0 });
-  assert.deepEqual(readAnalyserPeaks.call([]), { count: 0, peak: 0 });
+  assert.deepEqual(readAnalyserPeaks.call(quiet), { count: 1, peak: 0, running: 0, fftSize: 32 });
+  assert.deepEqual(readAnalyserPeaks.call([]), { count: 0, peak: 0, running: 0, fftSize: null });
+});
+
+test('selector map is only the 5.121.2 ids read from that client', () => {
+  const map = selectorMapFor('5.121.2');
+  assert.equal(map.elements.sidebar, 'NAVBAR');
+  assert.equal(map.elements['nav.wave'], 'NAVBAR_NAVIGATION_ITEM_HOME');
+  assert.equal(map.elements['nav.search'], 'NAVBAR_NAVIGATION_ITEM_SEARCH');
+  assert.equal(map.elements['settings.page'], 'SETTINGS_LIST');
+  assert.equal(map.elements['nav.hidden'].includes('NAVBAR_NAVIGATION_ITEM_KIDS'), true);
+  assert.equal(map.settingsPath, '/settings');
+  assert.equal(selectorMapFor('5.0.0'), null);
+  assert.equal(selectorMapFor(null), null);
+});
+
+test('linux loopback is unchecked only when a sound device exists', () => {
+  assert.equal(classifyLoopback({ platform: 'linux', hasSoundDevice: false, hasPulseServer: false }), 'no-device');
+  assert.equal(classifyLoopback({ platform: 'linux', hasSoundDevice: true, hasPulseServer: false }), 'present-untested');
+  assert.equal(classifyLoopback({ platform: 'win32', hasSoundDevice: false, hasPulseServer: false }), 'not-checked');
 });
 
 test('audio graph markers are read from the archive without copying it', () => {
@@ -613,6 +652,53 @@ test('report names the bundled audio graph and the region screen', () => {
   assert.match(text, /SETTINGS_LIST не найден/);
   assert.match(text, /Системный loopback не проверялся/);
   assert.equal(text.includes('патч выполнен'), false);
+});
+
+test('report describes a silent running analyser and a missing loopback device', () => {
+  const text = buildReport({
+    platform: 'linux',
+    decision: 'launch',
+    versions: { asar: '5.121.2' },
+    client: { exe: '/opt/yandexmusic/yandexmusic', source: 'known-path', displayName: 'Яндекс Музыка' },
+    launch: { port: 9, loopback: true },
+    surface: {
+      originalBackground: 'rgb(1, 1, 1)',
+      styledBackground: POC_BACKGROUND,
+      originalButton: 'rgb(2, 2, 2)',
+      styledButton: POC_BUTTON,
+      buttonFound: true,
+      absentAfterRestart: true,
+      restoredAfterReinject: true,
+    },
+    analyser: {
+      hasAudioContextCtor: true,
+      hasAnalyserNode: true,
+      liveContexts: 3,
+      analyserCount: 3,
+      spectrumPeak: 0,
+      contextRunning: 3,
+      fftSize: 32,
+      spectrumRead: false,
+    },
+    loopback: { status: 'no-device' },
+    selectorMap: selectorMapFor('5.121.2'),
+    menu: {
+      navCount: 0,
+      hideTried: false,
+      navbarFound: false,
+      settingsListFound: false,
+      settingsPageOpened: false,
+      regionScreen: true,
+      pageCount: 1,
+      bodyInsertRemoved: true,
+    },
+  });
+  assert.match(text, /контекст running: 3/);
+  assert.match(text, /fftSize 32/);
+  assert.match(text, /устройство вывода не найдено/);
+  assert.match(text, /Карта селекторов 5\.121\.2/);
+  assert.match(text, /Отладчик отдал одну страницу/);
+  assert.equal(text.includes('Системный loopback не проверялся'), false);
 });
 
 test('a finished windows run reports fuses, re-injection and an untouched archive', () => {
@@ -1160,7 +1246,8 @@ function fakeDocument({ body, head, buttons = [], navs = [], extras = [] }) {
       if (selector === 'button') return buttons[0] || null;
       const testId = selector.match(/^\[data-test-id="([A-Za-z0-9_.:-]{1,80})"\]$/);
       if (testId) {
-        return [...buttons, ...extras].find((node) => node.attrs['data-test-id'] === testId[1]) || null;
+        const navChildren = navs.flatMap((nav) => [nav, ...(nav.children || [])]);
+        return [...buttons, ...extras, ...navChildren].find((node) => node.attrs['data-test-id'] === testId[1]) || null;
       }
       if (selector === '[data-yms-poc="button"]') {
         return buttons.find((button) => button.attrs['data-yms-poc'] === 'button') || null;

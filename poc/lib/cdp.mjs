@@ -153,7 +153,8 @@ export async function inspectPage({ port, apply }) {
     let cdp;
     try {
       cdp = await connectCdp(picked.webSocketDebuggerUrl);
-      return await readApplied(cdp, apply);
+      const applied = await readApplied(cdp, apply);
+      return { ...applied, pageCount: picked.pageCount };
     } catch (error) {
       if (String(error?.message || '').includes('expression blocked')) throw error;
       lastError = error;
@@ -203,6 +204,8 @@ async function readApplied(cdp, apply) {
       liveContexts: await countAudioContexts(cdp),
       analyserCount: playback ? playback.count : null,
       spectrumPeak: playback ? playback.peak : null,
+      contextRunning: playback && Number.isInteger(playback.running) ? playback.running : null,
+      fftSize: playback && Number.isInteger(playback.fftSize) ? playback.fftSize : null,
       spectrumRead: Boolean(playback && playback.peak > 0),
     },
     menu,
@@ -295,7 +298,7 @@ async function readPlaybackSpectrum(cdp) {
       returnByValue: false,
     });
     protoId = response.result?.objectId || null;
-    if (!protoId) return { count: 0, peak: 0 };
+    if (!protoId) return { count: 0, peak: 0, running: 0, fftSize: null };
     const queried = await cdp.send('Runtime.queryObjects', { prototypeObjectId: protoId });
     objectsId = queried.objects?.objectId || null;
     if (!objectsId) return null;
@@ -307,7 +310,12 @@ async function readPlaybackSpectrum(cdp) {
     const value = peaks.result?.value;
     if (!value || typeof value.count !== 'number') return null;
     const peak = typeof value.peak === 'number' ? value.peak : 0;
-    return { count: value.count, peak };
+    return {
+      count: value.count,
+      peak,
+      running: Number.isInteger(value.running) ? value.running : null,
+      fftSize: Number.isInteger(value.fftSize) ? value.fftSize : null,
+    };
   } catch {
     return null;
   } finally {

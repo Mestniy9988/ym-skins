@@ -1,5 +1,7 @@
 import { findAudioGraphMarkers } from './audio-graph.mjs';
 import { linuxDebugExtras } from './launch.mjs';
+import { readLoopback } from './loopback.mjs';
+import { selectorMapFor } from './selector-map.mjs';
 import { POC_BACKGROUND, POC_BUTTON } from './page.mjs';
 import { buildLaunchArgs, sameColor } from './plan.mjs';
 import { buildReport } from './report.mjs';
@@ -26,7 +28,11 @@ export async function executeProbe(env, deps) {
   const client = found.client;
   const audioGraph = client.asar ? await safeCall(() => findAudioGraphMarkers(client.asar)) : null;
   const finish = (exitCode, facts) => {
-    const full = audioGraph ? { ...facts, audioGraph } : facts;
+    const full = { ...facts };
+    if (audioGraph) full.audioGraph = audioGraph;
+    const selectorMap = selectorMapFor(facts.versions?.asar);
+    if (selectorMap) full.selectorMap = selectorMap;
+    if (facts.platform === 'linux') full.loopback = readLoopback();
     return { exitCode, markdown: buildReport(full), facts: full };
   };
   const fuses = await safeCall(() => deps.readFuses(client.exe));
@@ -160,10 +166,16 @@ export async function executeProbe(env, deps) {
     launch: second.launch,
     surface,
     analyser: reapplied?.analyser || styled?.analyser || null,
-    menu: reapplied?.menu || styled?.menu || null,
+    menu: withPageCount(reapplied?.menu || styled?.menu || null, reapplied?.pageCount ?? styled?.pageCount),
     asar: { before: asarBefore, after: asarAfter },
   };
   return finish(accepted ? 0 : 1, facts);
+}
+
+function withPageCount(menu, pageCount) {
+  if (!menu) return null;
+  if (!Number.isInteger(pageCount)) return menu;
+  return { ...menu, pageCount };
 }
 
 async function launchChecked(client, deps, platform) {

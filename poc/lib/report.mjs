@@ -34,7 +34,7 @@ export function buildReport(facts = {}) {
     '',
     '## 3. AnalyserNode',
     '',
-    analyserSection(facts.analyser, facts.audioGraph),
+    analyserSection(facts.analyser, facts.audioGraph, facts.loopback),
     '',
     '## 4. Где версия и как ловится обновление',
     '',
@@ -46,7 +46,7 @@ export function buildReport(facts = {}) {
     '',
     '## 6. Меню и блок настроек',
     '',
-    menuSection(facts.menu),
+    menuSection(facts.menu, facts.selectorMap),
     '',
     '## Фон, кнопка и перезапуск',
     '',
@@ -149,9 +149,9 @@ function fuseSection(fuses) {
   return lines.length > 0 ? lines.join('\n') : 'Electron Fuses: не проверено.';
 }
 
-function analyserSection(analyser, audioGraph) {
+function analyserSection(analyser, audioGraph, loopback) {
   if (!analyser && !audioGraph) {
-    return 'Web Audio AnalyserNode: не проверено. Системный loopback в этом прототипе не проверялся.';
+    return `Web Audio AnalyserNode: не проверено. ${loopbackLine(loopback)}`;
   }
   const lines = [];
   if (analyser) {
@@ -167,8 +167,14 @@ function analyserSection(analyser, audioGraph) {
   }
   const graph = graphLine(audioGraph);
   if (graph) lines.push(graph);
-  lines.push('Системный loopback не проверялся.');
+  lines.push(loopbackLine(loopback));
   return lines.join(' ');
+}
+
+function loopbackLine(loopback) {
+  if (loopback?.status === 'no-device') return 'Системный loopback: устройство вывода не найдено.';
+  if (loopback?.status === 'present-untested') return 'Устройство вывода есть. Захват loopback не выполнялся.';
+  return 'Системный loopback не проверялся.';
 }
 
 function spectrumLine(analyser) {
@@ -182,7 +188,11 @@ function spectrumLine(analyser) {
     return 'Готовых AnalyserNode в странице нет. Спектр воспроизведения не снят.';
   }
   if (Number.isInteger(analyser.analyserCount) && analyser.analyserCount > 0) {
-    return `AnalyserNode в странице: ${analyser.analyserCount}. Отсчёты нулевые, спектр воспроизведения не снят.`;
+    const running = Number.isInteger(analyser.contextRunning) ? `, контекст running: ${analyser.contextRunning}` : '';
+    const fft = Number.isInteger(analyser.fftSize) && analyser.fftSize > 0 && analyser.fftSize <= 32768
+      ? `, fftSize ${analyser.fftSize}`
+      : '';
+    return `AnalyserNode в странице: ${analyser.analyserCount}${running}${fft}. Отсчёты нулевые, спектр воспроизведения не снят.`;
   }
   return 'спектр не снимался.';
 }
@@ -229,8 +239,12 @@ function versionSection(facts) {
   return lines.join('\n');
 }
 
-function menuSection(menu) {
-  if (!menu) return 'Скрытие пунктов меню и блок в настройках: не проверено.';
+function menuSection(menu, selectorMap) {
+  const mapVersion = safeMapVersion(selectorMap);
+  if (!menu) {
+    if (mapVersion) return `Карта селекторов ${mapVersion} есть. Страница меню не проверялась.`;
+    return 'Скрытие пунктов меню и блок в настройках: не проверено.';
+  }
   const lines = [];
   if (menu.regionScreen) {
     lines.push('Страница показала, что сервис недоступен в этом регионе. Это не плеер и не настройки.');
@@ -241,13 +255,24 @@ function menuSection(menu) {
     lines.push('Боковая навигация NAVBAR на странице не найдена.');
   }
   if (menu.hideTried) {
-    lines.push(
-      menu.hideApplied && menu.hideReverted
-        ? `Обратимая проба спрятала один дочерний узел навигации (узлов навигации: ${menu.navCount}) и вернула его на место.`
-        : 'Проба скрытия узла навигации не подтвердила обратимый эффект.',
-    );
+    const named = typeof menu.hiddenTestId === 'string' && /^[A-Z0-9_]{1,80}$/.test(menu.hiddenTestId)
+      ? menu.hiddenTestId
+      : '';
+    if (menu.hideApplied && menu.hideReverted && named) {
+      lines.push(`Обратимая проба спрятала пункт ${named} и вернула его на место.`);
+    } else if (menu.hideApplied && menu.hideReverted) {
+      lines.push(`Обратимая проба спрятала один дочерний узел навигации (узлов навигации: ${menu.navCount}) и вернула его на место.`);
+    } else {
+      lines.push('Проба скрытия узла навигации не подтвердила обратимый эффект.');
+    }
   } else {
     lines.push('Узел навигации для пробы не найден. Скрытие пунктов меню не проверено.');
+  }
+  if (mapVersion && menu.navbarFound === false) {
+    lines.push(`Карта селекторов ${mapVersion} задаёт NAVBAR и скрываемые пункты. На этой странице их нет.`);
+  }
+  if (Number.isInteger(menu.pageCount)) {
+    lines.push(menu.pageCount === 1 ? 'Отладчик отдал одну страницу.' : `Отладчик отдал страниц: ${menu.pageCount}.`);
   }
   if (menu.settingsListFound) {
     lines.push('На странице есть список настроек SETTINGS_LIST. Блок «Оформление» этим прогоном не встраивался.');
@@ -262,6 +287,11 @@ function menuSection(menu) {
     lines.push('В document.body узел ставится и тут же снимается. Это не раздел настроек.');
   }
   return lines.join('\n');
+}
+
+function safeMapVersion(selectorMap) {
+  const version = selectorMap?.ymVersion;
+  return typeof version === 'string' && /^\d+\.\d+\.\d+$/.test(version) ? version : '';
 }
 
 function surfaceSection(surface) {

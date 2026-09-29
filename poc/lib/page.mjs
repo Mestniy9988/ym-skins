@@ -100,9 +100,17 @@ export function readAnalyserPeaks() {
   const total = this.length || 0;
   const limit = Math.min(total, 8);
   let peak = 0;
+  let running = 0;
+  let fftSize = null;
+  let fftMixed = false;
   for (let index = 0; index < limit; index += 1) {
     const node = this[index];
     if (!node || typeof node.getByteFrequencyData !== 'function') continue;
+    if (node.context && node.context.state === 'running') running += 1;
+    if (typeof node.fftSize === 'number') {
+      if (fftSize == null) fftSize = node.fftSize;
+      else if (fftSize !== node.fftSize) fftMixed = true;
+    }
     const count = node.frequencyBinCount || 0;
     if (!count) continue;
     const bins = new Uint8Array(count);
@@ -111,7 +119,7 @@ export function readAnalyserPeaks() {
       if (bins[bin] > peak) peak = bins[bin];
     }
   }
-  return { count: total, peak };
+  return { count: total, peak, running, fftSize: fftMixed ? null : fftSize };
 }
 
 export function menuProbe(document, getComputedStyle) {
@@ -139,7 +147,22 @@ export function menuProbe(document, getComputedStyle) {
     result.bodyInsertRemoved = result.bodyInsertRemoved && !document.getElementById(probe.id);
   }
 
-  const child = navs[0]?.children?.[navs[0].children.length - 1];
+  const hiddenIds = [
+    'NAVBAR_NAVIGATION_ITEM_KIDS',
+    'NAVBAR_NAVIGATION_ITEM_NON_MUSIC',
+    'NAVBAR_NAVIGATION_ITEM_CONCERTS',
+    'NAVBAR_NAVIGATION_ITEM_PLUS',
+    'NAVBAR_NAVIGATION_ITEM_MUZMARKET',
+    'NAVBAR_NAVIGATION_ITEM_FOR_YOU_AND_TRENDS',
+  ];
+  let child = null;
+  for (const id of hiddenIds) {
+    const node = document.querySelector(`[data-test-id="${id}"]`);
+    if (!node) continue;
+    child = node;
+    result.hiddenTestId = id;
+    break;
+  }
   if (child) {
     result.hideTried = true;
     const previous = child.style.display;
