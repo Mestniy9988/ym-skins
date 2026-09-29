@@ -388,6 +388,7 @@ test('page scripts change one button and the background and do not touch storage
   assert.equal(after.buttonBackground, POC_BUTTON);
   assert.equal(after.buttonTestId, 'PLAY');
   assert.equal(after.stylePresent, true);
+  assert.equal(doc.styleText.includes('background-image: none'), true);
   assert.equal(sameColor(after.background, 'rgba(58, 24, 72, 1)'), true);
   const removed = removeSurface(doc);
   assert.equal(removed.removedStyle, true);

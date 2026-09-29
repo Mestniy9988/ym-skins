@@ -39,17 +39,30 @@ export function applySurface(document, getComputedStyle) {
     style.id = 'ym-skins-poc';
     (document.head || document.documentElement).appendChild(style);
   }
-  const width = document.documentElement ? document.documentElement.clientWidth : 0;
-  const height = document.documentElement ? document.documentElement.clientHeight : 0;
-  let cover = width && height && document.elementFromPoint
-    ? document.elementFromPoint(Math.floor(width / 2), Math.floor(height / 2))
-    : null;
-  let hops = 0;
-  while (cover && cover !== document.body && cover !== document.documentElement && hops < 5) {
-    if (cover.setAttribute) cover.setAttribute('data-yms-poc', 'backdrop');
-    cover = cover.parentElement;
-    hops += 1;
+  const root = document.documentElement;
+  const width = (root && root.clientWidth) || (typeof globalThis.innerWidth === 'number' ? globalThis.innerWidth : 0);
+  const height = (root && root.clientHeight) || (typeof globalThis.innerHeight === 'number' ? globalThis.innerHeight : 0);
+  const markBackdrop = (node) => {
+    if (!node || node === document.body || node === root || !node.setAttribute) return;
+    const boxW = node.offsetWidth || 0;
+    const boxH = node.offsetHeight || 0;
+    const covers = width > 0 && height > 0 && boxW >= width * 0.9 && boxH >= height * 0.7;
+    if (covers) node.setAttribute('data-yms-poc', 'backdrop');
+  };
+  if (width && height && document.elementFromPoint) {
+    const points = [[0.5, 0.5], [0.2, 0.45], [0.5, 0.8]];
+    for (const [px, py] of points) {
+      let cover = document.elementFromPoint(Math.floor(width * px), Math.floor(height * py));
+      let hops = 0;
+      while (cover && cover !== document.body && cover !== root && hops < 12) {
+        markBackdrop(cover);
+        cover = cover.parentElement;
+        hops += 1;
+      }
+    }
   }
+  const blocks = document.querySelectorAll ? document.querySelectorAll('div, main, section') : [];
+  for (const block of blocks) markBackdrop(block);
   const button = pickButton(document);
   const testId = button ? button.getAttribute('data-test-id') : null;
   let buttonRule = '';
@@ -60,7 +73,7 @@ export function applySurface(document, getComputedStyle) {
     buttonRule = `[data-yms-poc="button"] { background-color: ${POC_BUTTON} !important; }`;
   }
   style.textContent = [
-    `html, body, [data-yms-poc="backdrop"] { background-color: ${POC_BACKGROUND} !important; }`,
+    `html, body, [data-yms-poc="backdrop"] { background-color: ${POC_BACKGROUND} !important; background-image: none !important; }`,
     buttonRule,
   ].join('\n');
   return readSurface(document, getComputedStyle);
