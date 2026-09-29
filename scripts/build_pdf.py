@@ -41,6 +41,12 @@ pre code { background: none; padding: 0; font-size: 7.6pt; line-height: 1.25; }
 hr { border: none; border-top: 1px solid #ddd; margin: 12pt 0; }
 a { color: #0b5cad; text-decoration: none; }
 ul, ol { margin: 4pt 0 6pt; padding-left: 18pt; }
+img { max-width: 100%; border: 1px solid #ddd; border-radius: 4px; page-break-inside: avoid; }
+p:has(> img) { page-break-inside: avoid; text-align: center; }
+td img { display: block; margin: 0 auto 3pt; }
+td:has(img) { text-align: center; width: 50%; }
+p:has(+ p > img) { page-break-after: avoid; break-after: avoid; }
+thead:not(:has(th:not(:empty))) { display: none; }
 """
 
 
@@ -56,10 +62,12 @@ def main() -> None:
     body = markdown.markdown(SRC.read_text(encoding="utf-8"),
                              extensions=["tables", "fenced_code", "sane_lists"])
     body = re.sub(r"<td>([A-ZА-Я]-\d+)</td>", r'<td class="id">\1</td>', body)
+    # The HTML is written to a temp dir, so relative image paths must resolve against the repo root.
     html = (f'<!doctype html><html lang="ru"><head><meta charset="utf-8">'
+            f'<base href="{ROOT.as_uri()}/">'
             f"<title>Техническое задание — YM Skins</title><style>{CSS}</style></head>"
             f"<body>{body}</body></html>")
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         html_path = Path(tmp) / "tz.html"
         html_path.write_text(html, encoding="utf-8")
         tmp_pdf = Path(tmp) / "out.pdf"
