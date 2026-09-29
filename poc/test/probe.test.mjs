@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import vm from 'node:vm';
 
 import { readRootPackage, writeFixtureAsar } from '../lib/asar-meta.mjs';
 import { waitForPageTarget } from '../lib/cdp.mjs';
@@ -392,6 +393,19 @@ test('page scripts change one button and the background and do not touch storage
   });
   assert.equal(audio.hasAnalyserNode, true);
   assert.equal(audio.spectrumRead, false);
+});
+
+test('page expression carries its colors and runs without module scope', () => {
+  const source = pageExpression(applySurface);
+  assert.equal(source.includes(`const POC_BACKGROUND = ${JSON.stringify(POC_BACKGROUND)}`), true);
+  assert.equal(source.includes(`const POC_BUTTON = ${JSON.stringify(POC_BUTTON)}`), true);
+  const button = element('button');
+  const body = element('body');
+  const doc = fakeDocument({ body, head: element('head'), buttons: [button] });
+  const result = vm.runInNewContext(source, { document: doc, getComputedStyle: computed });
+  assert.equal(result.background, POC_BACKGROUND);
+  assert.equal(result.buttonBackground, POC_BUTTON);
+  assert.equal(result.stylePresent, true);
 });
 
 test('the play control is styled by its test id, not by a marker attribute', () => {
@@ -874,8 +888,9 @@ function fakeDocument({ body, head, buttons = [], navs = [] }) {
     },
     querySelectorAll(selector) {
       if (selector === 'nav, [role="navigation"], aside') return navs;
-      if (selector === '[data-yms-poc="button"]') {
-        return buttons.filter((button) => button.attrs['data-yms-poc'] === 'button');
+      if (selector === 'button') return buttons;
+      if (selector === '[data-yms-poc]' || selector === '[data-yms-poc="button"]') {
+        return buttons.filter((button) => button.attrs['data-yms-poc']);
       }
       return [];
     },
