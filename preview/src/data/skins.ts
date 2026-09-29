@@ -735,6 +735,42 @@ export const SKINS: Skin[] = [
   },
 ]
 
+const ORIGINAL_VARS: ThemeVars = {
+  '--bg': '#121212',
+  '--side': '#181818',
+  '--panel': '#202020',
+  '--text': '#ffffff',
+  '--muted': '#9b9b9b',
+  '--accent': '#ffd83d',
+  '--accent-2': '#ffb300',
+  '--line': 'rgba(255,255,255,.07)',
+  '--lcd-bg': '#1b1b1b',
+  '--lcd-fg': '#ffffff',
+  '--btn': '#ffd83d',
+  '--btn-fg': '#121212',
+  '--vis-1': '#ffd83d',
+  '--vis-2': '#ffb300',
+  '--vis-3': '#ffffff',
+  '--peak': '#ffffff',
+}
+
+export const ORIGINAL: Skin = {
+  id: 'original',
+  num: 0,
+  name: 'Оригинальная тема',
+  era: 'Стандартный вид',
+  concept: 'Стандартное оформление приложения без скинов.',
+  elements: '',
+  animation: '',
+  vis: 'bars',
+  visLabel: '',
+  hero: 'cover',
+  themes: [
+    { id: 'dark', name: 'Тёмная', vars: ORIGINAL_VARS },
+    { id: 'dark', name: 'Тёмная', vars: ORIGINAL_VARS },
+  ],
+}
+
 export type Track = { id: number; title: string; artist: string; album: string; dur: number; c1: string; c2: string }
 
 export const TRACKS: Track[] = [
