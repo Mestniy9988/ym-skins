@@ -155,9 +155,11 @@ export async function findInstalledClient() {
   return chosen;
 }
 
+export const MUSIC_EXE_NAMES = ['YandexMusic.exe', 'Yandex Music.exe', 'Яндекс Музыка.exe'];
+
 function exeInDir(dir) {
   if (!dir || typeof dir !== 'string') return null;
-  const names = ['YandexMusic.exe', 'Yandex Music.exe'];
+  const names = MUSIC_EXE_NAMES;
   for (const name of names) {
     const candidate = path.win32.join(dir, name);
     if (fs.existsSync(candidate)) return candidate;

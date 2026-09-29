@@ -57,7 +57,7 @@ export async function executeProbe(env, deps) {
       fuses,
       versions,
       update,
-      launch: { port: first.port, loopback: false },
+      launch: { port: first.port, loopback: false, reason: first.reason },
       asar: await archiveHashes(deps, client, asarBefore),
     };
     return { exitCode: 1, markdown: buildReport(facts), facts };
@@ -74,6 +74,7 @@ export async function executeProbe(env, deps) {
     return { exitCode: 1, markdown: buildReport(await facts), facts: await facts };
   }
   await first.handle.close();
+  if (deps.pause) await deps.pause(1500);
 
   const second = await launchChecked(client, deps);
   if (!second.ok) {
@@ -84,7 +85,7 @@ export async function executeProbe(env, deps) {
       fuses,
       versions,
       update,
-      launch: { port: second.port, loopback: false },
+      launch: { port: second.port, loopback: false, reason: second.reason },
       asar: await archiveHashes(deps, client, asarBefore),
     };
     return { exitCode: 1, markdown: buildReport(facts), facts };
@@ -155,9 +156,15 @@ async function launchChecked(client, deps) {
   const args = buildLaunchArgs(port);
   const handle = await deps.spawnDebugClient({ exe: client.exe, args, port });
   const loopback = await deps.assertLoopback(handle.pid, handle.port ?? port);
-  if (!loopback) {
+  const opened = loopback === true || loopback?.ok === true;
+  if (!opened) {
     await handle.close();
-    return { ok: false, port: handle.port ?? port, handle };
+    return {
+      ok: false,
+      port: handle.port ?? port,
+      reason: loopback?.reason || 'unconfirmed',
+      handle,
+    };
   }
   return { ok: true, port: handle.port ?? port, handle };
 }

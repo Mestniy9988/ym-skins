@@ -3,7 +3,7 @@ import net from 'node:net';
 import path from 'node:path';
 
 import { fetchLoopbackJson } from './cdp.mjs';
-import { parseNetstat } from './plan.mjs';
+import { classifyListeners, parseNetstat } from './plan.mjs';
 
 export function reservePort() {
   return new Promise((resolve, reject) => {
@@ -39,22 +39,29 @@ export async function spawnDebugClient({ exe, args, port }) {
 
 export async function assertLoopback(pid, port) {
   const deadline = Date.now() + 45000;
+  let reason = 'timeout';
   while (Date.now() < deadline) {
     const rows = parseNetstat(await execText('netstat', ['-ano', '-p', 'TCP'])).filter((row) => row.port === port);
-    if (rows.length > 0) {
-      const tree = await processTree(pid);
-      if (rows.some((row) => !tree.has(row.pid))) return false;
-      if (rows.some((row) => row.address !== '127.0.0.1' && row.address !== '::1')) return false;
-      try {
-        await fetchLoopbackJson(port, '/json/version');
-        return true;
-      } catch {
-        return false;
-      }
+    const seen = classifyListeners(rows, await processTree(pid));
+    if (seen.state === 'exposed') return { ok: false, reason: 'exposed' };
+    if (seen.state === 'absent') {
+      await delay(300);
+      continue;
     }
-    await delay(300);
+    if (seen.state === 'foreign') {
+      reason = 'foreign';
+      await delay(300);
+      continue;
+    }
+    try {
+      await fetchLoopbackJson(port, '/json/version');
+      return { ok: true };
+    } catch {
+      reason = 'no-http';
+      await delay(300);
+    }
   }
-  return false;
+  return { ok: false, reason };
 }
 
 async function processTree(root) {

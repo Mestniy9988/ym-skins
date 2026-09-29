@@ -14,6 +14,7 @@ import {
   readFuses,
 } from '../lib/fuses.mjs';
 import {
+  MUSIC_EXE_NAMES,
   chooseClient,
   exeFromDisplayIcon,
   isMusicDisplayName,
@@ -32,6 +33,7 @@ import {
   auditExpression,
   bindIsLoopback,
   buildLaunchArgs,
+  classifyListeners,
   decideRun,
   parseNetstat,
   pickPageTarget,
@@ -216,6 +218,56 @@ test('netstat accepts a loopback listener and rejects a public one', () => {
   assert.equal(bindIsLoopback(parseNetstat(exposed), 43123, 4000), false);
 });
 
+test('a missing debug port is not described as a public listener', () => {
+  assert.deepEqual(classifyListeners([], new Set([4])), { state: 'absent' });
+  assert.equal(
+    classifyListeners([{ address: '127.0.0.1', port: 1, pid: 4 }], new Set([4])).state,
+    'loopback',
+  );
+  assert.equal(
+    classifyListeners([{ address: '0.0.0.0', port: 1, pid: 4 }], new Set([4])).state,
+    'exposed',
+  );
+  assert.equal(
+    classifyListeners([{ address: '127.0.0.1', port: 1, pid: 9 }], new Set([4])).state,
+    'foreign',
+  );
+  assert.ok(MUSIC_EXE_NAMES.includes('Яндекс Музыка.exe'));
+});
+
+test('a port that never opens is reported as unopened, not as a public bind', async () => {
+  const result = await executeProbe(
+    { platform: 'win32' },
+    {
+      findClient: async () => ({
+        ambiguous: false,
+        client: {
+          exe: 'C:\\YM\\YandexMusic.exe',
+          asar: 'C:\\YM\\resources\\app.asar',
+          source: 'registry',
+          displayName: 'Яндекс Музыка',
+          running: false,
+        },
+      }),
+      readFuses: async () => ({ found: false, wires: [] }),
+      hashFile: async () => 'same',
+      readVersions: async () => ({ asar: null, exe: null, updateFeed: null }),
+      loadBaseline: async () => null,
+      saveBaseline: async () => {},
+      reservePort: async () => 43123,
+      spawnDebugClient: async () => ({ pid: 77, port: 43123, close: async () => {} }),
+      assertLoopback: async () => ({ ok: false, reason: 'timeout' }),
+      inspectPage: async () => {
+        throw new Error('should not inspect');
+      },
+    },
+  );
+  assert.equal(result.exitCode, 1);
+  assert.match(result.markdown, /не открылся/);
+  assert.match(result.markdown, /не внедр/);
+  assert.equal(result.markdown.includes('только localhost'), false);
+});
+
 test('page target drops titles, query strings and non-loopback sockets', () => {
   const picked = pickPageTarget([
     {
@@ -243,6 +295,19 @@ test('page target drops titles, query strings and non-loopback sockets', () => {
   assert.equal(dumped.includes('secret'), false);
   assert.equal(dumped.includes('Account Name'), false);
   assert.equal(dumped.includes('music.example/home'), false);
+  const blank = pickPageTarget([
+    {
+      type: 'page',
+      url: 'about:blank',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:9/devtools/page/BLANK',
+    },
+    {
+      type: 'page',
+      url: 'file:///app/index.html',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:9/devtools/page/APP',
+    },
+  ]);
+  assert.equal(blank.webSocketDebuggerUrl, 'ws://127.0.0.1:9/devtools/page/APP');
 });
 
 test('page scripts change one button and the background and do not touch storage', () => {

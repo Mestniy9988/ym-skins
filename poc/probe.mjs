@@ -42,6 +42,7 @@ const result = await executeProbe(
     saveBaseline: async (snapshot) => writeJson(baselinePath, snapshot),
     saveSession: async (session) => writeJson(sessionPath, session),
     reservePort,
+    pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     spawnDebugClient,
     assertLoopback,
     inspectPage,

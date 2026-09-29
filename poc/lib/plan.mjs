@@ -59,6 +59,16 @@ export function bindIsLoopback(rows, port, pid) {
   return mine.every((row) => row.address === '127.0.0.1' || row.address === '::1');
 }
 
+export function classifyListeners(rows, pids) {
+  if (!rows?.length) return { state: 'absent' };
+  if (rows.some((row) => row.address !== '127.0.0.1' && row.address !== '::1')) {
+    return { state: 'exposed' };
+  }
+  const owned = pids instanceof Set ? pids : new Set(pids);
+  if (rows.some((row) => !owned.has(row.pid))) return { state: 'foreign' };
+  return { state: 'loopback' };
+}
+
 export function pickPageTarget(targets) {
   const pages = [];
   for (const target of targets || []) {
@@ -74,6 +84,7 @@ export function pickPageTarget(targets) {
     if (socketUrl.protocol !== 'ws:' && socketUrl.protocol !== 'wss:') continue;
     if (socketUrl.hostname !== '127.0.0.1' && socketUrl.hostname !== 'localhost') continue;
     if (pageUrl.protocol === 'devtools:') continue;
+    if (pageUrl.href === 'about:blank' || pageUrl.href.startsWith('about:blank')) continue;
     pages.push({
       webSocketDebuggerUrl: target.webSocketDebuggerUrl,
       protocol: pageUrl.protocol,

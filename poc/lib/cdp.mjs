@@ -133,8 +133,7 @@ export function connectCdp(wsUrl) {
 }
 
 export async function inspectPage({ port, apply }) {
-  const list = await fetchLoopbackJson(port, '/json/list');
-  const picked = pickPageTarget(list);
+  const picked = await waitForPage(port);
   if (!picked.webSocketDebuggerUrl) {
     return {
       pageFound: false,
@@ -151,7 +150,7 @@ export async function inspectPage({ port, apply }) {
   try {
     await cdp.send('Runtime.enable');
     if (!apply) {
-      const surface = await evaluate(cdp, documentCall(readSurface));
+      const surface = await readSurfaceWhenReady(cdp);
       return {
         pageFound: true,
         background: surface?.background || null,
@@ -164,6 +163,7 @@ export async function inspectPage({ port, apply }) {
         menu: null,
       };
     }
+    await readSurfaceWhenReady(cdp);
     await evaluate(cdp, documentCall(applySurface));
     await delay(1500);
     const surface = await evaluate(cdp, documentCall(readSurface));
@@ -202,6 +202,28 @@ export async function restoreSurface(port) {
   } finally {
     cdp.close();
   }
+}
+
+async function waitForPage(port) {
+  const deadline = Date.now() + 20000;
+  let picked = { webSocketDebuggerUrl: null, pageCount: 0 };
+  while (Date.now() < deadline) {
+    const list = await fetchLoopbackJson(port, '/json/list');
+    picked = pickPageTarget(list);
+    if (picked.webSocketDebuggerUrl) return picked;
+    await delay(400);
+  }
+  return picked;
+}
+
+async function readSurfaceWhenReady(cdp) {
+  const deadline = Date.now() + 10000;
+  let surface = await evaluate(cdp, documentCall(readSurface));
+  while (!surface?.buttonFound && Date.now() < deadline) {
+    await delay(400);
+    surface = await evaluate(cdp, documentCall(readSurface));
+  }
+  return surface;
 }
 
 function documentCall(fn) {
