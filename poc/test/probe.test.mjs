@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import vm from 'node:vm';
 
+import { findAudioGraphMarkers } from '../lib/audio-graph.mjs';
 import { readRootPackage, writeFixtureAsar } from '../lib/asar-meta.mjs';
 import { waitForPageTarget } from '../lib/cdp.mjs';
 import { executeProbe } from '../lib/execute.mjs';
@@ -32,6 +33,7 @@ import {
   analyserProbe,
   applySurface,
   menuProbe,
+  readAnalyserPeaks,
   pageExpression,
   pickButton,
   readSurface,
@@ -395,9 +397,11 @@ test('page scripts change one button and the background and do not touch storage
   assert.equal(readSurface(doc, computed).stylePresent, false);
   assert.equal(button.attrs['data-yms-poc'], undefined);
 
-  const sources = [readSurface, applySurface, removeSurface, analyserProbe, menuProbe, pickButton]
-    .map((fn) => pageExpression(fn))
-    .join('\n');
+  const sources = [
+    ...[readSurface, applySurface, removeSurface, analyserProbe, menuProbe, pickButton]
+      .map((fn) => pageExpression(fn)),
+    readAnalyserPeaks.toString(),
+  ].join('\n');
   assert.equal(auditExpression(sources), null);
   const audio = analyserProbe({
     AudioContext: class AudioContext {},
@@ -451,8 +455,61 @@ test('menu probe hides one node and puts the page back', () => {
   assert.equal(result.hideReverted, true);
   assert.equal(result.settingsPageOpened, false);
   assert.equal(result.bodyInsertRemoved, true);
+  assert.equal(result.navbarFound, false);
+  assert.equal(result.settingsListFound, false);
+  assert.equal(result.regionScreen, false);
   assert.equal(item.style.display, 'block');
   assert.equal(doc.getElementById('ym-skins-poc-settings-probe'), null);
+});
+
+test('region screen is recorded and a navbar test id is visible to the probe', () => {
+  const body = element('body');
+  body.innerText = 'Yandex Music is currently not available in your region';
+  const navbar = element('div');
+  navbar.attrs['data-test-id'] = 'NAVBAR';
+  const doc = fakeDocument({ body, head: element('head'), extras: [navbar] });
+  const result = menuProbe(doc, computed);
+  assert.equal(result.regionScreen, true);
+  assert.equal(result.navbarFound, true);
+  assert.equal(result.settingsListFound, false);
+  assert.equal(result.settingsPageOpened, false);
+  assert.equal(result.hideTried, false);
+});
+
+test('analyser peaks come from existing nodes only', () => {
+  const loud = [{
+    frequencyBinCount: 4,
+    getByteFrequencyData(bins) {
+      bins.set([0, 12, 3, 0]);
+    },
+  }];
+  assert.deepEqual(readAnalyserPeaks.call(loud), { count: 1, peak: 12 });
+  const quiet = [{
+    frequencyBinCount: 2,
+    getByteFrequencyData(bins) {
+      bins.fill(0);
+    },
+  }];
+  assert.deepEqual(readAnalyserPeaks.call(quiet), { count: 1, peak: 0 });
+  assert.deepEqual(readAnalyserPeaks.call([]), { count: 0, peak: 0 });
+});
+
+test('audio graph markers are read from the archive without copying it', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ym-audio-'));
+  const file = path.join(dir, 'app.asar');
+  const gap = 'x'.repeat(80);
+  fs.writeFileSync(file, `createMediaElementSource${gap}createAnalyser${gap}getByteFrequencyData`);
+  assert.deepEqual(findAudioGraphMarkers(file), {
+    mediaElement: true,
+    analyser: true,
+    frequency: true,
+    complete: true,
+  });
+  fs.writeFileSync(file, 'createMediaElementSource only');
+  const partial = findAudioGraphMarkers(file);
+  assert.equal(partial.complete, false);
+  assert.equal(partial.analyser, false);
+  fs.rmSync(dir, { recursive: true });
 });
 
 test('empty report marks every stage-1 item unchecked and does not claim a patch', () => {
@@ -508,7 +565,54 @@ test('a finished linux run is not described as a Windows check', () => {
   assert.match(text, /Linux-клиент/);
   assert.match(text, /--no-sandbox/);
   assert.match(text, /--gtk-version=3/);
+  assert.match(text, /выбран вариант А/);
+  assert.match(text, /Windows-сборка этим прогоном не проверялась/);
   assert.equal(text.includes('Платформа прогона: win32'), false);
+  assert.equal(text.includes('вариант А рабочий'), false);
+});
+
+test('report names the bundled audio graph and the region screen', () => {
+  const text = buildReport({
+    platform: 'linux',
+    decision: 'launch',
+    client: { exe: '/opt/yandexmusic/yandexmusic', source: 'known-path', displayName: 'Яндекс Музыка' },
+    launch: { port: 9, loopback: true },
+    surface: {
+      originalBackground: 'rgb(1, 1, 1)',
+      styledBackground: POC_BACKGROUND,
+      originalButton: 'rgb(2, 2, 2)',
+      styledButton: POC_BUTTON,
+      buttonFound: true,
+      absentAfterRestart: true,
+      restoredAfterReinject: true,
+    },
+    analyser: {
+      hasAudioContextCtor: true,
+      hasAnalyserNode: true,
+      liveContexts: 0,
+      analyserCount: 0,
+      spectrumPeak: 0,
+      spectrumRead: false,
+    },
+    audioGraph: { mediaElement: true, analyser: true, frequency: true, complete: true },
+    menu: {
+      navCount: 0,
+      hideTried: false,
+      navbarFound: false,
+      settingsListFound: false,
+      settingsPageOpened: false,
+      regionScreen: true,
+      bodyInsertRemoved: true,
+    },
+    asar: { before: 'abc', after: 'abc' },
+  });
+  assert.match(text, /createMediaElementSource/);
+  assert.match(text, /Готовых AnalyserNode в странице нет/);
+  assert.match(text, /недоступен в этом регионе/);
+  assert.match(text, /NAVBAR на странице не найдена/);
+  assert.match(text, /SETTINGS_LIST не найден/);
+  assert.match(text, /Системный loopback не проверялся/);
+  assert.equal(text.includes('патч выполнен'), false);
 });
 
 test('a finished windows run reports fuses, re-injection and an untouched archive', () => {
@@ -569,6 +673,7 @@ test('a finished windows run reports fuses, re-injection and an untouched archiv
   assert.match(text, /app\.asar не изменялся|файл не переписывался/);
   assert.match(text, /спектр не снимался|не проверено/);
   assert.match(text, /страница настроек не открывалась/);
+  assert.match(text, /выбран вариант А/);
   assert.match(text, /Подпись macOS[\s\S]*не проверено/);
   assert.equal(text.includes('патч выполнен'), false);
 });
@@ -1037,7 +1142,7 @@ function computed(el) {
   return { backgroundColor: 'rgb(0, 0, 0)', display: 'block' };
 }
 
-function fakeDocument({ body, head, buttons = [], navs = [] }) {
+function fakeDocument({ body, head, buttons = [], navs = [], extras = [] }) {
   const nodes = new Map();
   const doc = {
     body,
@@ -1054,7 +1159,9 @@ function fakeDocument({ body, head, buttons = [], navs = [] }) {
     querySelector(selector) {
       if (selector === 'button') return buttons[0] || null;
       const testId = selector.match(/^\[data-test-id="([A-Za-z0-9_.:-]{1,80})"\]$/);
-      if (testId) return buttons.find((button) => button.attrs['data-test-id'] === testId[1]) || null;
+      if (testId) {
+        return [...buttons, ...extras].find((node) => node.attrs['data-test-id'] === testId[1]) || null;
+      }
       if (selector === '[data-yms-poc="button"]') {
         return buttons.find((button) => button.attrs['data-yms-poc'] === 'button') || null;
       }

@@ -34,7 +34,7 @@ export function buildReport(facts = {}) {
     '',
     '## 3. AnalyserNode',
     '',
-    analyserSection(facts.analyser),
+    analyserSection(facts.analyser, facts.audioGraph),
     '',
     '## 4. Где версия и как ловится обновление',
     '',
@@ -112,7 +112,11 @@ function injectionSection(facts) {
     const host = facts.platform === 'linux' ? 'Linux-клиент' : 'клиент';
     const lines = [
       `На этом запуске ${host} стартовал с отладочным портом ${facts.launch.port} на 127.0.0.1. Фон и кнопка менялись через CDP. Патч app.asar не выполнялся. После перезапуска тот же эффект снова ставится только повторным внедрением.`,
+      'Для этого прогона выбран вариант А: протокол отладки на 127.0.0.1. Патч архива не выбран.',
     ];
+    if (facts.platform === 'linux') {
+      lines.push('Этот выбор сделан по Linux-пакету. Windows-сборка этим прогоном не проверялась.');
+    }
     if (facts.launch.noSandbox) {
       lines.push('Флаг --no-sandbox добавлен, потому что chrome-sandbox в этом запуске без setuid. Для обычной установки он не является настройкой по умолчанию.');
     }
@@ -145,17 +149,54 @@ function fuseSection(fuses) {
   return lines.length > 0 ? lines.join('\n') : 'Electron Fuses: не проверено.';
 }
 
-function analyserSection(analyser) {
-  if (!analyser) return 'Web Audio AnalyserNode: не проверено. Системный loopback в этом прототипе не проверялся.';
-  const ctor = analyser.hasAnalyserNode ? 'конструктор AnalyserNode в странице есть' : 'конструктора AnalyserNode в странице нет';
-  const context = analyser.hasAudioContextCtor ? 'конструктор AudioContext есть' : 'конструктора AudioContext нет';
-  const live = analyser.liveContexts == null
-    ? 'живые AudioContext: не проверено'
-    : `живых AudioContext: ${analyser.liveContexts}`;
-  const spectrum = analyser.spectrumRead
-    ? 'спектр читался'
-    : 'спектр не снимался';
-  return `${ctor}; ${context}; ${live}; ${spectrum}.`;
+function analyserSection(analyser, audioGraph) {
+  if (!analyser && !audioGraph) {
+    return 'Web Audio AnalyserNode: не проверено. Системный loopback в этом прототипе не проверялся.';
+  }
+  const lines = [];
+  if (analyser) {
+    const ctor = analyser.hasAnalyserNode ? 'конструктор AnalyserNode в странице есть' : 'конструктора AnalyserNode в странице нет';
+    const context = analyser.hasAudioContextCtor ? 'конструктор AudioContext есть' : 'конструктора AudioContext нет';
+    const live = analyser.liveContexts == null
+      ? 'живые AudioContext: не проверено'
+      : `живых AudioContext: ${analyser.liveContexts}`;
+    lines.push(`${ctor}; ${context}; ${live}.`);
+    lines.push(spectrumLine(analyser));
+  } else {
+    lines.push('Страница клиента не проверялась.');
+  }
+  const graph = graphLine(audioGraph);
+  if (graph) lines.push(graph);
+  lines.push('Системный loopback не проверялся.');
+  return lines.join(' ');
+}
+
+function spectrumLine(analyser) {
+  if (analyser.spectrumRead) {
+    const peak = Number.isInteger(analyser.spectrumPeak) && analyser.spectrumPeak > 0 && analyser.spectrumPeak <= 255
+      ? ` Пик отсчёта ${analyser.spectrumPeak}.`
+      : '';
+    return `Спектр читался у существующего AnalyserNode.${peak}`;
+  }
+  if (analyser.analyserCount === 0) {
+    return 'Готовых AnalyserNode в странице нет. Спектр воспроизведения не снят.';
+  }
+  if (Number.isInteger(analyser.analyserCount) && analyser.analyserCount > 0) {
+    return `AnalyserNode в странице: ${analyser.analyserCount}. Отсчёты нулевые, спектр воспроизведения не снят.`;
+  }
+  return 'спектр не снимался.';
+}
+
+function graphLine(audioGraph) {
+  if (!audioGraph) return '';
+  if (audioGraph.complete) {
+    return 'В app.asar есть вызовы createMediaElementSource, createAnalyser и getByteFrequencyData. Это граф страницы вокруг элемента воспроизведения, не системный loopback.';
+  }
+  const missing = [];
+  if (!audioGraph.mediaElement) missing.push('createMediaElementSource');
+  if (!audioGraph.analyser) missing.push('createAnalyser');
+  if (!audioGraph.frequency) missing.push('getByteFrequencyData');
+  return `В app.asar не найдены вызовы: ${missing.join(', ')}.`;
 }
 
 function versionSection(facts) {
@@ -191,6 +232,14 @@ function versionSection(facts) {
 function menuSection(menu) {
   if (!menu) return 'Скрытие пунктов меню и блок в настройках: не проверено.';
   const lines = [];
+  if (menu.regionScreen) {
+    lines.push('Страница показала, что сервис недоступен в этом регионе. Это не плеер и не настройки.');
+  }
+  if (menu.navbarFound === true) {
+    lines.push('Боковая навигация с data-test-id NAVBAR на странице есть.');
+  } else if (menu.navbarFound === false) {
+    lines.push('Боковая навигация NAVBAR на странице не найдена.');
+  }
   if (menu.hideTried) {
     lines.push(
       menu.hideApplied && menu.hideReverted
@@ -200,11 +249,15 @@ function menuSection(menu) {
   } else {
     lines.push('Узел навигации для пробы не найден. Скрытие пунктов меню не проверено.');
   }
-  lines.push(
-    menu.settingsPageOpened
-      ? 'Страница настроек открывалась.'
-      : 'Проверено частично: страница настроек не открывалась, встраивание блока в неё не проверено.',
-  );
+  if (menu.settingsListFound) {
+    lines.push('На странице есть список настроек SETTINGS_LIST. Блок «Оформление» этим прогоном не встраивался.');
+  } else if (menu.settingsPageOpened) {
+    lines.push('Страница настроек открывалась. Блок «Оформление» этим прогоном не встраивался.');
+  } else if (menu.settingsListFound === false) {
+    lines.push('Список настроек SETTINGS_LIST не найден. Встраивание блока «Оформление» не проверено.');
+  } else {
+    lines.push('Проверено частично: страница настроек не открывалась, встраивание блока в неё не проверено.');
+  }
   if (menu.bodyInsertRemoved) {
     lines.push('В document.body узел ставится и тут же снимается. Это не раздел настроек.');
   }

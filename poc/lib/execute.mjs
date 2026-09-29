@@ -1,3 +1,4 @@
+import { findAudioGraphMarkers } from './audio-graph.mjs';
 import { linuxDebugExtras } from './launch.mjs';
 import { POC_BACKGROUND, POC_BUTTON } from './page.mjs';
 import { buildLaunchArgs, sameColor } from './plan.mjs';
@@ -23,6 +24,11 @@ export async function executeProbe(env, deps) {
   }
 
   const client = found.client;
+  const audioGraph = client.asar ? await safeCall(() => findAudioGraphMarkers(client.asar)) : null;
+  const finish = (exitCode, facts) => {
+    const full = audioGraph ? { ...facts, audioGraph } : facts;
+    return { exitCode, markdown: buildReport(full), facts: full };
+  };
   const fuses = await safeCall(() => deps.readFuses(client.exe));
   const versions = await safeCall(() => deps.readVersions?.(client));
   const asarBefore = client.asar ? await safeCall(() => deps.hashFile(client.asar)) : null;
@@ -43,12 +49,12 @@ export async function executeProbe(env, deps) {
       update,
       asar: asarBefore ? { before: asarBefore, after: null } : null,
     };
-    return { exitCode: 2, markdown: buildReport(facts), facts };
+    return finish(2, facts);
   }
 
   if (!deps.assertLoopback || !deps.spawnDebugClient || !deps.inspectPage) {
     const facts = { platform, decision: 'launch', client, fuses, versions, update };
-    return { exitCode: 1, markdown: buildReport(facts), facts };
+    return finish(1, facts);
   }
 
   const first = await launchChecked(client, deps, platform);
@@ -63,7 +69,7 @@ export async function executeProbe(env, deps) {
       launch: first.launch,
       asar: await archiveHashes(deps, client, asarBefore),
     };
-    return { exitCode: 1, markdown: buildReport(facts), facts };
+    return finish(1, facts);
   }
 
   let original;
@@ -73,8 +79,8 @@ export async function executeProbe(env, deps) {
     styled = await deps.inspectPage({ port: first.handle.port, apply: true });
   } catch (error) {
     await first.handle.close();
-    const facts = failureFacts({ platform, client, fuses, versions, update, asarBefore, deps, port: first.handle.port, error });
-    return { exitCode: 1, markdown: buildReport(await facts), facts: await facts };
+    const facts = await failureFacts({ platform, client, fuses, versions, update, asarBefore, deps, port: first.handle.port, error });
+    return finish(1, facts);
   }
   await first.handle.close();
   if (deps.pause) await deps.pause(1500);
@@ -91,7 +97,7 @@ export async function executeProbe(env, deps) {
       launch: second.launch,
       asar: await archiveHashes(deps, client, asarBefore),
     };
-    return { exitCode: 1, markdown: buildReport(facts), facts };
+    return finish(1, facts);
   }
 
   let afterRestart;
@@ -101,8 +107,8 @@ export async function executeProbe(env, deps) {
     reapplied = await deps.inspectPage({ port: second.handle.port, apply: true });
   } catch (error) {
     await second.handle.close();
-    const facts = failureFacts({ platform, client, fuses, versions, update, asarBefore, deps, port: second.handle.port, error });
-    return { exitCode: 1, markdown: buildReport(await facts), facts: await facts };
+    const facts = await failureFacts({ platform, client, fuses, versions, update, asarBefore, deps, port: second.handle.port, error });
+    return finish(1, facts);
   }
 
   const asarAfter = await safeCall(() => deps.hashFile(client.asar));
@@ -157,7 +163,7 @@ export async function executeProbe(env, deps) {
     menu: reapplied?.menu || styled?.menu || null,
     asar: { before: asarBefore, after: asarAfter },
   };
-  return { exitCode: accepted ? 0 : 1, markdown: buildReport(facts), facts };
+  return finish(accepted ? 0 : 1, facts);
 }
 
 async function launchChecked(client, deps, platform) {

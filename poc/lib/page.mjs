@@ -96,16 +96,39 @@ export function analyserProbe(window) {
   };
 }
 
+export function readAnalyserPeaks() {
+  const total = this.length || 0;
+  const limit = Math.min(total, 8);
+  let peak = 0;
+  for (let index = 0; index < limit; index += 1) {
+    const node = this[index];
+    if (!node || typeof node.getByteFrequencyData !== 'function') continue;
+    const count = node.frequencyBinCount || 0;
+    if (!count) continue;
+    const bins = new Uint8Array(count);
+    node.getByteFrequencyData(bins);
+    for (let bin = 0; bin < bins.length; bin += 1) {
+      if (bins[bin] > peak) peak = bins[bin];
+    }
+  }
+  return { count: total, peak };
+}
+
 export function menuProbe(document, getComputedStyle) {
   const navs = [...document.querySelectorAll('nav, [role="navigation"], aside')];
+  const pageText = String(document.body?.innerText || '');
   const result = {
     navCount: navs.length,
     hideTried: false,
     hideApplied: false,
     hideReverted: false,
+    navbarFound: Boolean(document.querySelector('[data-test-id="NAVBAR"]')),
+    settingsListFound: Boolean(document.querySelector('[data-test-id="SETTINGS_LIST"]')),
     settingsPageOpened: false,
+    regionScreen: /not available in your region/i.test(pageText),
     bodyInsertRemoved: false,
   };
+  result.settingsPageOpened = result.settingsListFound;
   const probe = document.createElement('div');
   probe.id = 'ym-skins-poc-settings-probe';
   document.body.appendChild(probe);
