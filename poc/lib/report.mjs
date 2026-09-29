@@ -21,8 +21,7 @@ export function buildReport(facts = {}) {
     '',
     'Инструмент неофициальный. Этот прогон не читает токены, cookies и данные аккаунта. app.asar не патчится.',
     '',
-    `- Платформа прогона: ${facts.platform || 'не проверено'}`,
-    '- Ожидаемая база: Windows 11 25H2, клиент 5.121.2. Номер ниже — только если он прочитан с машины.',
+    ...platformLines(facts),
     `- Клиент: ${clientLine(facts)}`,
     '',
     '## 1. Способ внедрения',
@@ -61,6 +60,19 @@ export function buildReport(facts = {}) {
   return `${lines.join('\n')}\n`;
 }
 
+function platformLines(facts) {
+  if (facts.platform === 'linux') {
+    return [
+      '- Платформа прогона: linux. Это запуск Linux-пакета, не проверка Windows 11.',
+      '- Ожидаемая база Windows 11 25H2 этим запуском не проверялась. Номер клиента ниже — только если он прочитан с этой машины.',
+    ];
+  }
+  return [
+    `- Платформа прогона: ${facts.platform || 'не проверено'}`,
+    '- Ожидаемая база: Windows 11 25H2, клиент 5.121.2. Номер ниже — только если он прочитан с машины.',
+  ];
+}
+
 function clientLine(facts) {
   const client = facts.client;
   if (!client?.exe) return 'не проверено';
@@ -70,7 +82,7 @@ function clientLine(facts) {
 
 function injectionSection(facts) {
   if (facts.decision === 'not-windows') {
-    return 'Клиент не запускался: скрипт работает только на Windows и здесь процесс не стартовал. Способ внедрения не проверено. Этот прогон не является проверкой.';
+    return 'Клиент не запускался: этот скрипт стартует процесс на Windows и Linux, а здесь платформа другая. Способ внедрения не проверено. Этот прогон не является проверкой.';
   }
   if (facts.decision === 'client-not-found') {
     return 'Установленный клиент не найден. Способ внедрения не проверено.';
@@ -97,7 +109,15 @@ function injectionSection(facts) {
     return 'Клиент запускался с адресом 127.0.0.1, но слушающий порт не подтверждён как только localhost. Страница не внедрялась.';
   }
   if (facts.surface?.restoredAfterReinject && facts.launch?.loopback) {
-    return `На этом запуске клиент стартовал с отладочным портом ${facts.launch.port} на 127.0.0.1. Фон и кнопка менялись через CDP. Патч app.asar не выполнялся. После перезапуска тот же эффект снова ставится только повторным внедрением.`;
+    const host = facts.platform === 'linux' ? 'Linux-клиент' : 'клиент';
+    const lines = [
+      `На этом запуске ${host} стартовал с отладочным портом ${facts.launch.port} на 127.0.0.1. Фон и кнопка менялись через CDP. Патч app.asar не выполнялся. После перезапуска тот же эффект снова ставится только повторным внедрением.`,
+    ];
+    if (facts.launch.noSandbox) {
+      lines.push('Флаг --no-sandbox добавлен, потому что chrome-sandbox в этом запуске без setuid. Для обычной установки он не является настройкой по умолчанию.');
+    }
+    if (facts.launch.gtk3) lines.push('Для окна в этом запуске добавлен --gtk-version=3.');
+    return lines.join(' ');
   }
   if (facts.decision === 'launch') {
     return 'Запуск с отладочным портом на 127.0.0.1 начинался, но эффект фона и кнопки после перезапуска не подтверждён. Способ внедрения не проверено. Патч app.asar не выполнялся.';

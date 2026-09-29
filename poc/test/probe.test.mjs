@@ -9,7 +9,7 @@ import vm from 'node:vm';
 import { readRootPackage, writeFixtureAsar } from '../lib/asar-meta.mjs';
 import { waitForPageTarget } from '../lib/cdp.mjs';
 import { executeProbe } from '../lib/execute.mjs';
-import { clientSpawnOptions, tasklistHasPid } from '../lib/launch.mjs';
+import { chromeSandboxMode, clientSpawnOptions, linuxDebugExtras, tasklistHasPid } from '../lib/launch.mjs';
 import {
   FUSE_SENTINEL,
   FUSE_V1_NAMES,
@@ -23,6 +23,8 @@ import {
   installFolders,
   isMusicDisplayName,
   knownInstallDirs,
+  linuxClientCandidate,
+  linuxInstallDirs,
 } from '../lib/find-client.mjs';
 import {
   POC_BACKGROUND,
@@ -42,6 +44,7 @@ import {
   classifyListeners,
   decideRun,
   parseNetstat,
+  parseProcNet,
   pickPageTarget,
   sameColor,
 } from '../lib/plan.mjs';
@@ -190,10 +193,14 @@ test('two registry installs are not silently collapsed into one', () => {
   assert.equal(chosen.client, null);
 });
 
-test('launch is refused off Windows, without a client, and while the client is already open', () => {
+test('launch is refused off Windows and Linux, without a client, and while the client is already open', () => {
   assert.deepEqual(
-    decideRun({ platform: 'linux', client: { exe: 'x' }, alreadyRunning: false }),
+    decideRun({ platform: 'darwin', client: { exe: 'x' }, alreadyRunning: false }),
     { launch: false, code: 'not-windows' },
+  );
+  assert.deepEqual(
+    decideRun({ platform: 'linux', client: null, alreadyRunning: false }),
+    { launch: false, code: 'client-not-found' },
   );
   assert.deepEqual(
     decideRun({ platform: 'win32', client: null, alreadyRunning: false }),
@@ -205,6 +212,10 @@ test('launch is refused off Windows, without a client, and while the client is a
   );
   assert.equal(
     decideRun({ platform: 'win32', client: { exe: 'x' }, alreadyRunning: false }).launch,
+    true,
+  );
+  assert.equal(
+    decideRun({ platform: 'linux', client: { exe: 'x' }, alreadyRunning: false }).launch,
     true,
   );
 });
@@ -460,15 +471,43 @@ test('empty report marks every stage-1 item unchecked and does not claim a patch
   assert.equal(text.includes('app.asar не изменялся'), false);
 });
 
-test('linux refusal report does not look like a successful client run', () => {
+test('darwin refusal report does not look like a successful client run', () => {
   const text = buildReport({
-    platform: 'linux',
+    platform: 'darwin',
     decision: 'not-windows',
   });
   assert.match(text, /не запускался/);
   assert.match(text, /не проверено/);
   assert.equal(text.includes('вариант А рабочий'), false);
   assert.equal(text.includes('app.asar не изменялся'), false);
+});
+
+test('a finished linux run is not described as a Windows check', () => {
+  const text = buildReport({
+    platform: 'linux',
+    decision: 'launch',
+    client: {
+      exe: '/opt/Яндекс Музыка/yandexmusic',
+      source: 'known-path',
+      displayName: 'Яндекс Музыка',
+    },
+    launch: { port: 43123, loopback: true, gtk3: true, noSandbox: true },
+    surface: {
+      originalBackground: 'rgb(245, 245, 245)',
+      styledBackground: POC_BACKGROUND,
+      originalButton: 'rgb(1, 1, 1)',
+      styledButton: POC_BUTTON,
+      buttonFound: true,
+      absentAfterRestart: true,
+      restoredAfterReinject: true,
+    },
+    asar: { before: 'abc', after: 'abc' },
+  });
+  assert.match(text, /не проверка Windows 11/);
+  assert.match(text, /Linux-клиент/);
+  assert.match(text, /--no-sandbox/);
+  assert.match(text, /--gtk-version=3/);
+  assert.equal(text.includes('Платформа прогона: win32'), false);
 });
 
 test('a finished windows run reports fuses, re-injection and an untouched archive', () => {
@@ -584,11 +623,72 @@ test('the client process is detached and a tasklist row identifies its pid', () 
   assert.equal(options.detached, true);
   assert.equal(options.stdio, 'ignore');
   assert.equal(options.cwd, 'C:\\YM');
+  assert.equal(options.env, undefined);
+  const linux = clientSpawnOptions('/opt/Яндекс Музыка/yandexmusic');
+  assert.equal(linux.cwd, '/opt/Яндекс Музыка');
+  assert.equal(linux.detached, true);
+  if (process.platform === 'linux') {
+    assert.match(linux.env.HOME, /ym-skins-probe-home$/);
+    assert.notEqual(linux.env.HOME, process.env.HOME);
+  }
   assert.equal(tasklistHasPid('"YandexMusic.exe","4321","Console","1","100 K"', 4321), true);
   assert.equal(
     tasklistHasPid('INFO: No tasks are running which match the specified criteria.', 4321),
     false,
   );
+});
+
+test('proc net listeners decode loopback and a public bind', () => {
+  const text = [
+    '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode',
+    '   0: 0100007F:9935 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 12345 1 0000000000000000 100 0 0 10 0',
+    '   1: 00000000:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 999 1 0000000000000000 100 0 0 10 0',
+    '   2: 00000000000000000000000001000000:1F90 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000 0 0 42 1 0000000000000000 100 0 0 10 0',
+  ].join('\n');
+  const rows = parseProcNet(text);
+  assert.deepEqual(rows, [
+    { address: '127.0.0.1', port: 39221, inode: 12345 },
+    { address: '0.0.0.0', port: 80, inode: 999 },
+    { address: '::1', port: 8080, inode: 42 },
+  ]);
+  assert.equal(
+    classifyListeners([{ address: '0.0.0.0', port: 80, pid: 4 }], new Set([4])).state,
+    'exposed',
+  );
+});
+
+test('a linux install is the music binary next to app.asar', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ym-linux-client-'));
+  assert.equal(linuxClientCandidate(root), null);
+  fs.mkdirSync(path.join(root, 'resources'));
+  fs.writeFileSync(path.join(root, 'yandexmusic'), '');
+  fs.writeFileSync(path.join(root, 'resources', 'app.asar'), '');
+  const candidate = linuxClientCandidate(root);
+  assert.equal(candidate.displayName, 'Яндекс Музыка');
+  assert.equal(candidate.exe, path.join(root, 'yandexmusic'));
+  assert.equal(candidate.asar, path.join(root, 'resources', 'app.asar'));
+  const dirs = linuxInstallDirs({ HOME: '/home/a' });
+  assert.ok(dirs.includes('/opt/Яндекс Музыка'));
+  assert.ok(dirs.includes('/home/a/.local/opt/Яндекс Музыка'));
+});
+
+test('linux debug flags stay on loopback and skip no-sandbox when the helper is setuid', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ym-sandbox-'));
+  const exe = path.join(dir, 'yandexmusic');
+  fs.writeFileSync(exe, '');
+  fs.writeFileSync(path.join(dir, 'chrome-sandbox'), '');
+  fs.chmodSync(path.join(dir, 'chrome-sandbox'), 0o755);
+  assert.equal(chromeSandboxMode(exe), 'no-setuid');
+  fs.chmodSync(path.join(dir, 'chrome-sandbox'), 0o4755);
+  assert.equal(chromeSandboxMode(exe), 'setuid');
+  const plain = linuxDebugExtras(exe, { sandboxMode: () => 'setuid', userDataDir: '/tmp/ym-profile' });
+  assert.deepEqual(plain, [
+    '--gtk-version=3',
+    '--user-data-dir=/tmp/ym-profile',
+  ]);
+  const open = linuxDebugExtras(exe, { sandboxMode: () => 'no-setuid', userDataDir: '/tmp/ym-profile' });
+  assert.equal(open.includes('--no-sandbox'), true);
+  assert.equal(open.some((arg) => arg.includes('0.0.0.0')), false);
 });
 
 test('page discovery retries when the debug list is not ready yet', async () => {
@@ -625,14 +725,14 @@ test('an unidentified listener is not described as a foreign process', () => {
   assert.equal(text.includes('не из этого запуска'), false);
 });
 
-test('linux execution does not search, read or spawn the client', async () => {
+test('darwin execution does not search, read or spawn the client', async () => {
   let called = false;
   const boom = () => {
     called = true;
     throw new Error('should not touch the client');
   };
   const result = await executeProbe(
-    { platform: 'linux' },
+    { platform: 'darwin' },
     {
       findClient: boom,
       readFuses: boom,
@@ -645,6 +745,26 @@ test('linux execution does not search, read or spawn the client', async () => {
   assert.equal(result.exitCode, 2);
   assert.match(result.markdown, /не запускался/);
   assert.match(result.markdown, /не проверено/);
+});
+
+test('linux execution stops before spawn when no client is installed', async () => {
+  let spawned = false;
+  const result = await executeProbe(
+    { platform: 'linux' },
+    {
+      findClient: async () => ({ ambiguous: false, client: null }),
+      spawnDebugClient: async () => {
+        spawned = true;
+      },
+      inspectPage: async () => {
+        spawned = true;
+      },
+    },
+  );
+  assert.equal(spawned, false);
+  assert.equal(result.exitCode, 2);
+  assert.match(result.markdown, /не найден/);
+  assert.match(result.markdown, /не проверка Windows 11/);
 });
 
 test('an already running client is not killed or relaunched', async () => {
@@ -685,6 +805,59 @@ test('an already running client is not killed or relaunched', async () => {
   assert.equal(result.exitCode, 2);
   assert.match(result.markdown, /OnlyLoadAppFromAsar/);
   assert.match(result.markdown, /не проверено/);
+});
+
+test('linux launch keeps the debug port on loopback and records container flags', async () => {
+  const launches = [];
+  const base = {
+    findClient: async () => ({
+      ambiguous: false,
+      client: {
+        exe: '/opt/Яндекс Музыка/yandexmusic',
+        asar: '/opt/Яндекс Музыка/resources/app.asar',
+        source: 'known-path',
+        displayName: 'Яндекс Музыка',
+        running: false,
+      },
+    }),
+    readFuses: async () => ({ found: false, wires: [] }),
+    hashFile: async () => 'same',
+    readVersions: async () => ({ asar: '5.121.2', exe: null, updateFeed: null }),
+    loadBaseline: async () => null,
+    reservePort: async () => 43123,
+    userDataDir: '/tmp/ym-skins-probe-profile',
+    spawnDebugClient: async (spec) => {
+      launches.push(spec);
+      return {
+        pid: 5,
+        port: spec.port,
+        close: async () => {},
+      };
+    },
+    assertLoopback: async () => ({ ok: false, reason: 'timeout' }),
+    inspectPage: async () => {
+      throw new Error('page should stay untouched');
+    },
+  };
+  const open = await executeProbe(
+    { platform: 'linux' },
+    { ...base, sandboxMode: () => 'no-setuid' },
+  );
+  assert.equal(open.exitCode, 1);
+  assert.equal(launches.length, 1);
+  assert.equal(launches[0].args.includes('--remote-debugging-address=127.0.0.1'), true);
+  assert.equal(launches[0].args.includes('--gtk-version=3'), true);
+  assert.equal(launches[0].args.includes('--no-sandbox'), true);
+  assert.equal(launches[0].args.includes('--user-data-dir=/tmp/ym-skins-probe-profile'), true);
+  assert.equal(launches[0].args.some((arg) => arg.includes('0.0.0.0')), false);
+  assert.match(open.markdown, /отладочный порт не открылся/);
+  const sealed = await executeProbe(
+    { platform: 'linux' },
+    { ...base, sandboxMode: () => 'setuid' },
+  );
+  assert.equal(sealed.exitCode, 1);
+  assert.equal(launches[1].args.includes('--no-sandbox'), false);
+  assert.equal(launches[1].args.includes('--gtk-version=3'), true);
 });
 
 test('a public debug port is closed and the page is not touched', async () => {

@@ -1,11 +1,14 @@
+import { linuxDebugExtras } from './launch.mjs';
 import { POC_BACKGROUND, POC_BUTTON } from './page.mjs';
 import { buildLaunchArgs, sameColor } from './plan.mjs';
 import { buildReport } from './report.mjs';
 import { compareSnapshots } from './snapshot.mjs';
 
+const LAUNCH_PLATFORMS = new Set(['win32', 'linux']);
+
 export async function executeProbe(env, deps) {
   const platform = env.platform;
-  if (platform !== 'win32') {
+  if (!LAUNCH_PLATFORMS.has(platform)) {
     const facts = { platform, decision: 'not-windows' };
     return { exitCode: 2, markdown: buildReport(facts), facts };
   }
@@ -48,7 +51,7 @@ export async function executeProbe(env, deps) {
     return { exitCode: 1, markdown: buildReport(facts), facts };
   }
 
-  const first = await launchChecked(client, deps);
+  const first = await launchChecked(client, deps, platform);
   if (!first.ok) {
     const facts = {
       platform,
@@ -57,7 +60,7 @@ export async function executeProbe(env, deps) {
       fuses,
       versions,
       update,
-      launch: { port: first.port, loopback: false, reason: first.reason },
+      launch: first.launch,
       asar: await archiveHashes(deps, client, asarBefore),
     };
     return { exitCode: 1, markdown: buildReport(facts), facts };
@@ -76,7 +79,7 @@ export async function executeProbe(env, deps) {
   await first.handle.close();
   if (deps.pause) await deps.pause(1500);
 
-  const second = await launchChecked(client, deps);
+  const second = await launchChecked(client, deps, platform);
   if (!second.ok) {
     const facts = {
       platform,
@@ -85,7 +88,7 @@ export async function executeProbe(env, deps) {
       fuses,
       versions,
       update,
-      launch: { port: second.port, loopback: false, reason: second.reason },
+      launch: second.launch,
       asar: await archiveHashes(deps, client, asarBefore),
     };
     return { exitCode: 1, markdown: buildReport(facts), facts };
@@ -127,7 +130,12 @@ export async function executeProbe(env, deps) {
   const accepted = hashesStable && surface.restoredAfterReinject && surface.absentAfterRestart && surface.buttonFound;
   if (!accepted) await second.handle.close();
   else if (deps.saveSession) {
-    await deps.saveSession({ pid: second.handle.pid, port: second.handle.port, exe: client.exe });
+    await deps.saveSession({
+      pid: second.handle.pid,
+      port: second.handle.port,
+      exe: client.exe,
+      userDataDir: second.launch.userDataDir || null,
+    });
   }
   if (accepted && deps.saveBaseline) {
     await deps.saveBaseline({
@@ -143,7 +151,7 @@ export async function executeProbe(env, deps) {
     fuses,
     versions,
     update,
-    launch: { port: second.handle.port, loopback: true },
+    launch: second.launch,
     surface,
     analyser: reapplied?.analyser || styled?.analyser || null,
     menu: reapplied?.menu || styled?.menu || null,
@@ -152,22 +160,39 @@ export async function executeProbe(env, deps) {
   return { exitCode: accepted ? 0 : 1, markdown: buildReport(facts), facts };
 }
 
-async function launchChecked(client, deps) {
+async function launchChecked(client, deps, platform) {
   const port = deps.reservePort ? await deps.reservePort() : 0;
-  const args = buildLaunchArgs(port);
+  const extras = platform === 'linux'
+    ? linuxDebugExtras(client.exe, { sandboxMode: deps.sandboxMode, userDataDir: deps.userDataDir })
+    : [];
+  const args = buildLaunchArgs(port, extras);
   const handle = await deps.spawnDebugClient({ exe: client.exe, args, port });
   const loopback = await deps.assertLoopback(handle.pid, handle.port ?? port, client.exe);
   const opened = loopback === true || loopback?.ok === true;
+  const launch = launchFacts(handle.port ?? port, opened, extras, loopback?.reason);
   if (!opened) {
     await handle.close();
     return {
       ok: false,
-      port: handle.port ?? port,
-      reason: loopback?.reason || 'unconfirmed',
+      port: launch.port,
+      reason: launch.reason,
+      launch,
       handle,
     };
   }
-  return { ok: true, port: handle.port ?? port, handle };
+  return { ok: true, port: launch.port, launch, handle };
+}
+
+function launchFacts(port, opened, extras, reason) {
+  const dataDir = extras.find((arg) => arg.startsWith('--user-data-dir='));
+  return {
+    port,
+    loopback: opened,
+    reason: opened ? undefined : (reason || 'unconfirmed'),
+    gtk3: extras.includes('--gtk-version=3'),
+    noSandbox: extras.includes('--no-sandbox'),
+    userDataDir: dataDir ? dataDir.slice('--user-data-dir='.length) : null,
+  };
 }
 
 async function archiveHashes(deps, client, asarBefore) {
