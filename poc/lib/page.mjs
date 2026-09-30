@@ -1,5 +1,7 @@
 import { insertAppearance, probeAppearance, removeAppearance } from './appearance.mjs';
 import { probeHideNav } from './nav.mjs';
+import { clearStamps, stampElements } from './runtime-stamp.mjs';
+import { selectorMapFor } from './selector-map.mjs';
 
 export const POC_BACKGROUND = 'rgb(58, 24, 72)';
 export const POC_BUTTON = 'rgb(232, 255, 71)';
@@ -17,7 +19,7 @@ export function pickButton(document) {
 }
 
 export function pageExpression(fn) {
-  return `(() => {\nconst POC_BACKGROUND = ${JSON.stringify(POC_BACKGROUND)};\nconst POC_BUTTON = ${JSON.stringify(POC_BUTTON)};\n${pickButton.toString()}\n${readSurface.toString()}\n${insertAppearance.toString()}\n${removeAppearance.toString()}\n${probeAppearance.toString()}\n${probeHideNav.toString()}\nreturn (${fn.toString()})(document, getComputedStyle);\n})()`;
+  return `(() => {\nconst POC_BACKGROUND = ${JSON.stringify(POC_BACKGROUND)};\nconst POC_BUTTON = ${JSON.stringify(POC_BUTTON)};\n${pickButton.toString()}\n${readSurface.toString()}\n${insertAppearance.toString()}\n${removeAppearance.toString()}\n${probeAppearance.toString()}\n${probeHideNav.toString()}\n${stampElements.toString()}\n${clearStamps.toString()}\nreturn (${fn.toString()})(document, getComputedStyle, ${JSON.stringify(selectorMapFor('5.121.2'))});\n})()`;
 }
 
 export function readSurface(document, getComputedStyle) {
@@ -141,7 +143,7 @@ export function readAnalyserPeaks() {
   };
 }
 
-export function menuProbe(document, getComputedStyle) {
+export function menuProbe(document, getComputedStyle, map) {
   const navs = [...document.querySelectorAll('nav, [role="navigation"], aside')];
   const pageText = String(document.body?.innerText || '');
   const result = {
@@ -185,5 +187,10 @@ export function menuProbe(document, getComputedStyle) {
   result.hideApplied = hidden.hideApplied;
   result.hideReverted = hidden.hideReverted;
   if (hidden.hiddenTestId) result.hiddenTestId = hidden.hiddenTestId;
+
+  const stamped = stampElements(document, map);
+  const cleared = clearStamps(document);
+  result.stampApplied = stamped.stamped;
+  result.stampCleared = cleared.cleared;
   return result;
 }

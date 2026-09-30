@@ -372,7 +372,20 @@ function menuSection(menu, selectorMap, selectorScan, smoke) {
   if (scanLine) lines.push(scanLine);
   const smokeLine = formatSmoke(smoke);
   if (smokeLine) lines.push(smokeLine);
+  const stampLine = formatStamp(menu);
+  if (stampLine) lines.push(stampLine);
   return lines.join('\n');
+}
+
+function formatStamp(menu) {
+  if (!Number.isInteger(menu?.stampApplied) || !Number.isInteger(menu?.stampCleared)) return '';
+  if (menu.stampApplied > 0 && menu.stampCleared === menu.stampApplied) {
+    return `Обратимая проба поставила метки data-yms на узлах: ${menu.stampApplied}, и сразу сняла их.`;
+  }
+  if (menu.stampApplied === 0 && menu.stampCleared === 0) {
+    return 'Узлы для меток data-yms на странице не найдены. Метки не ставились.';
+  }
+  return 'Проба меток data-yms не подтвердила, что все поставленные метки сняты.';
 }
 
 function formatSmoke(smoke) {

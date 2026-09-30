@@ -511,6 +511,10 @@ test('menu probe expression hides a mapped item without module scope', () => {
   assert.equal(doc.getElementById('ym-skins-appearance'), null);
   const ids = selectorMapFor('5.121.2').elements['nav.hidden'];
   for (const id of ids) assert.equal(source.includes(`'${id}'`), true);
+  assert.equal(source.includes('data-yms-stamp'), true);
+  assert.equal(result.stampCleared, result.stampApplied);
+  assert.equal(item.attrs['data-yms'], undefined);
+  assert.equal(list.attrs['data-yms'], undefined);
 });
 
 test('menu probe does not hide an unnamed nav child', () => {
@@ -555,11 +559,15 @@ test('a page with the player, navbar and settings list passes smoke', () => {
     buttons: [play],
     extras: [bar, nav, list],
   });
-  const menu = menuProbe(doc, computed);
+  const menu = menuProbe(doc, computed, selectorMapFor('5.121.2'));
   assert.equal(menu.playerBarFound, true);
   assert.equal(menu.playerPlayFound, true);
   assert.equal(menu.navbarFound, true);
   assert.equal(menu.settingsListFound, true);
+  assert.equal(menu.stampApplied, 4);
+  assert.equal(menu.stampCleared, 4);
+  assert.equal(bar.attrs['data-yms'], undefined);
+  assert.equal(play.attrs['data-yms-stamp'], undefined);
   assert.equal(doc.getElementById('ym-skins-appearance'), null);
   const facts = attachStage1Decisions({
     selectorMap: selectorMapFor('5.121.2'),
@@ -1414,6 +1422,10 @@ function fakeDocument({ body, head, buttons = [], navs = [], extras = [] }) {
       if (selector === 'button') return buttons;
       if (selector === '[data-yms-poc]' || selector === '[data-yms-poc="button"]') {
         return buttons.filter((button) => button.attrs['data-yms-poc']);
+      }
+      if (selector === '[data-yms-stamp="1"]') {
+        const navChildren = navs.flatMap((nav) => [nav, ...(nav.children || [])]);
+        return [...buttons, ...extras, ...navChildren].filter((node) => node.attrs['data-yms-stamp'] === '1');
       }
       return [];
     },
