@@ -1,3 +1,8 @@
+import { insertAppearance, probeAppearance, removeAppearance } from './appearance.mjs';
+import { probeHideNav } from './nav.mjs';
+import { clearStamps, stampElements } from './runtime-stamp.mjs';
+import { selectorMapFor } from './selector-map.mjs';
+
 export const POC_BACKGROUND = 'rgb(58, 24, 72)';
 export const POC_BUTTON = 'rgb(232, 255, 71)';
 
@@ -14,7 +19,7 @@ export function pickButton(document) {
 }
 
 export function pageExpression(fn) {
-  return `(() => {\nconst POC_BACKGROUND = ${JSON.stringify(POC_BACKGROUND)};\nconst POC_BUTTON = ${JSON.stringify(POC_BUTTON)};\n${pickButton.toString()}\n${readSurface.toString()}\nreturn (${fn.toString()})(document, getComputedStyle);\n})()`;
+  return `(() => {\nconst POC_BACKGROUND = ${JSON.stringify(POC_BACKGROUND)};\nconst POC_BUTTON = ${JSON.stringify(POC_BUTTON)};\n${pickButton.toString()}\n${readSurface.toString()}\n${insertAppearance.toString()}\n${removeAppearance.toString()}\n${probeAppearance.toString()}\n${probeHideNav.toString()}\n${stampElements.toString()}\n${clearStamps.toString()}\nreturn (${fn.toString()})(document, getComputedStyle, ${JSON.stringify(selectorMapFor('5.121.2'))});\n})()`;
 }
 
 export function readSurface(document, getComputedStyle) {
@@ -39,17 +44,30 @@ export function applySurface(document, getComputedStyle) {
     style.id = 'ym-skins-poc';
     (document.head || document.documentElement).appendChild(style);
   }
-  const width = document.documentElement ? document.documentElement.clientWidth : 0;
-  const height = document.documentElement ? document.documentElement.clientHeight : 0;
-  let cover = width && height && document.elementFromPoint
-    ? document.elementFromPoint(Math.floor(width / 2), Math.floor(height / 2))
-    : null;
-  let hops = 0;
-  while (cover && cover !== document.body && cover !== document.documentElement && hops < 5) {
-    if (cover.setAttribute) cover.setAttribute('data-yms-poc', 'backdrop');
-    cover = cover.parentElement;
-    hops += 1;
+  const root = document.documentElement;
+  const width = (root && root.clientWidth) || (typeof globalThis.innerWidth === 'number' ? globalThis.innerWidth : 0);
+  const height = (root && root.clientHeight) || (typeof globalThis.innerHeight === 'number' ? globalThis.innerHeight : 0);
+  const markBackdrop = (node) => {
+    if (!node || node === document.body || node === root || !node.setAttribute) return;
+    const boxW = node.offsetWidth || 0;
+    const boxH = node.offsetHeight || 0;
+    const covers = width > 0 && height > 0 && boxW >= width * 0.9 && boxH >= height * 0.7;
+    if (covers) node.setAttribute('data-yms-poc', 'backdrop');
+  };
+  if (width && height && document.elementFromPoint) {
+    const points = [[0.5, 0.5], [0.2, 0.45], [0.5, 0.8]];
+    for (const [px, py] of points) {
+      let cover = document.elementFromPoint(Math.floor(width * px), Math.floor(height * py));
+      let hops = 0;
+      while (cover && cover !== document.body && cover !== root && hops < 12) {
+        markBackdrop(cover);
+        cover = cover.parentElement;
+        hops += 1;
+      }
+    }
   }
+  const blocks = document.querySelectorAll ? document.querySelectorAll('div, main, section') : [];
+  for (const block of blocks) markBackdrop(block);
   const button = pickButton(document);
   const testId = button ? button.getAttribute('data-test-id') : null;
   let buttonRule = '';
@@ -60,7 +78,7 @@ export function applySurface(document, getComputedStyle) {
     buttonRule = `[data-yms-poc="button"] { background-color: ${POC_BUTTON} !important; }`;
   }
   style.textContent = [
-    `html, body, [data-yms-poc="backdrop"] { background-color: ${POC_BACKGROUND} !important; }`,
+    `html, body, [data-yms-poc="backdrop"] { background-color: ${POC_BACKGROUND} !important; background-image: none !important; }`,
     buttonRule,
   ].join('\n');
   return readSurface(document, getComputedStyle);
@@ -83,16 +101,65 @@ export function analyserProbe(window) {
   };
 }
 
-export function menuProbe(document, getComputedStyle) {
+export function readAnalyserPeaks() {
+  const total = this.length || 0;
+  const limit = Math.min(total, 8);
+  let peak = 0;
+  let running = 0;
+  let fftSize = null;
+  let fftMixed = false;
+  let best = null;
+  for (let index = 0; index < limit; index += 1) {
+    const node = this[index];
+    if (!node || typeof node.getByteFrequencyData !== 'function') continue;
+    if (node.context && node.context.state === 'running') running += 1;
+    if (typeof node.fftSize === 'number') {
+      if (fftSize == null) fftSize = node.fftSize;
+      else if (fftSize !== node.fftSize) fftMixed = true;
+    }
+    const count = node.frequencyBinCount || 0;
+    if (!count) continue;
+    const bins = new Uint8Array(count);
+    node.getByteFrequencyData(bins);
+    let local = 0;
+    const sample = [];
+    const cap = Math.min(bins.length, 32);
+    for (let bin = 0; bin < bins.length; bin += 1) {
+      if (bins[bin] > local) local = bins[bin];
+      if (bin < cap) sample.push(bins[bin]);
+    }
+    if (sample.length > 0 && local > sample[sample.length - 1] && local > Math.max(...sample)) {
+      sample[sample.length - 1] = local;
+    }
+    if (local > peak) peak = local;
+    if (!best || local > best.local) best = { local, sample };
+  }
+  return {
+    count: total,
+    peak,
+    running,
+    fftSize: fftMixed ? null : fftSize,
+    bins: best ? best.sample : [],
+  };
+}
+
+export function menuProbe(document, getComputedStyle, map) {
   const navs = [...document.querySelectorAll('nav, [role="navigation"], aside')];
+  const pageText = String(document.body?.innerText || '');
   const result = {
     navCount: navs.length,
     hideTried: false,
     hideApplied: false,
     hideReverted: false,
+    navbarFound: Boolean(document.querySelector('[data-test-id="NAVBAR"]')),
+    settingsListFound: Boolean(document.querySelector('[data-test-id="SETTINGS_LIST"]')),
+    playerBarFound: Boolean(document.querySelector('[data-test-id="PLAYERBAR_DESKTOP"]')),
+    playerPlayFound: Boolean(document.querySelector('[data-test-id="PLAY_BUTTON"]')),
     settingsPageOpened: false,
+    regionScreen: /not available in your region/i.test(pageText),
     bodyInsertRemoved: false,
   };
+  result.settingsPageOpened = result.settingsListFound;
   const probe = document.createElement('div');
   probe.id = 'ym-skins-poc-settings-probe';
   document.body.appendChild(probe);
@@ -103,19 +170,27 @@ export function menuProbe(document, getComputedStyle) {
     result.bodyInsertRemoved = result.bodyInsertRemoved && !document.getElementById(probe.id);
   }
 
-  const child = navs[0]?.children?.[navs[0].children.length - 1];
-  if (child) {
-    result.hideTried = true;
-    const previous = child.style.display;
-    try {
-      child.setAttribute('data-yms-poc-hide', '1');
-      child.style.display = 'none';
-      result.hideApplied = getComputedStyle(child).display === 'none';
-    } finally {
-      child.style.display = previous;
-      child.removeAttribute('data-yms-poc-hide');
-      result.hideReverted = getComputedStyle(child).display !== 'none';
-    }
-  }
+  const placed = probeAppearance(document);
+  result.appearanceInserted = placed.inserted;
+  result.appearanceFirst = placed.firstChild;
+  result.appearanceRemoved = placed.removed;
+
+  const hidden = probeHideNav(document, getComputedStyle, [
+    'NAVBAR_NAVIGATION_ITEM_KIDS',
+    'NAVBAR_NAVIGATION_ITEM_NON_MUSIC',
+    'NAVBAR_NAVIGATION_ITEM_CONCERTS',
+    'NAVBAR_NAVIGATION_ITEM_PLUS',
+    'NAVBAR_NAVIGATION_ITEM_MUZMARKET',
+    'NAVBAR_NAVIGATION_ITEM_FOR_YOU_AND_TRENDS',
+  ]);
+  result.hideTried = hidden.hideTried;
+  result.hideApplied = hidden.hideApplied;
+  result.hideReverted = hidden.hideReverted;
+  if (hidden.hiddenTestId) result.hiddenTestId = hidden.hiddenTestId;
+
+  const stamped = stampElements(document, map);
+  const cleared = clearStamps(document);
+  result.stampApplied = stamped.stamped;
+  result.stampCleared = cleared.cleared;
   return result;
 }

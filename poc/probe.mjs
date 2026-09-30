@@ -17,8 +17,8 @@ const sessionPath = path.join(outDir, 'session.json');
 const baselinePath = path.join(outDir, 'baseline.json');
 
 if (process.argv.includes('--restore')) {
-  if (process.platform !== 'win32') {
-    console.error('Снятие стиля здесь не выполняется: клиент запускается только на Windows.');
+  if (process.platform !== 'win32' && process.platform !== 'linux') {
+    console.error('Снятие стиля здесь не выполняется: клиент запускается на Windows и Linux.');
     process.exit(2);
   }
   const session = readJson(sessionPath);

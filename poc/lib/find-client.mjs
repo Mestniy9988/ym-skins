@@ -39,6 +39,44 @@ export function knownInstallDirs(env) {
   return dirs;
 }
 
+export const LINUX_BINARY = 'yandexmusic';
+
+export function linuxInstallDirs(env = {}) {
+  const dirs = [
+    '/opt/Яндекс Музыка',
+    '/opt/yandexmusic',
+    '/opt/YandexMusic',
+  ];
+  if (env.HOME) {
+    dirs.push(path.join(env.HOME, '.local', 'opt', 'Яндекс Музыка'));
+    dirs.push(path.join(env.HOME, '.local', 'opt', 'yandexmusic'));
+  }
+  return dirs;
+}
+
+export function linuxClientCandidate(dir) {
+  if (!dir || typeof dir !== 'string') return null;
+  const exe = path.join(dir, LINUX_BINARY);
+  const asar = path.join(dir, 'resources', 'app.asar');
+  if (!fs.existsSync(exe) || !fs.existsSync(asar)) return null;
+  let realExe = exe;
+  try {
+    realExe = fs.realpathSync(exe);
+  } catch {
+    realExe = exe;
+  }
+  const installDir = path.dirname(realExe);
+  return {
+    exe: realExe,
+    asar: path.join(installDir, 'resources', 'app.asar'),
+    installDir,
+    source: 'known-path',
+    displayName: 'Яндекс Музыка',
+    displayVersion: null,
+    running: false,
+  };
+}
+
 export function installFolders(root, childNames) {
   const versions = (childNames || [])
     .filter((name) => /^app-\d[\w.-]*$/.test(name))
@@ -104,6 +142,7 @@ function candidateFromExe(exe, source, displayName, displayVersion) {
 }
 
 export async function findInstalledClient() {
+  if (process.platform === 'linux') return findLinuxClient();
   if (process.platform !== 'win32') return { ambiguous: false, client: null };
   const found = [];
   const registryText = await powershell(`
@@ -164,6 +203,45 @@ export async function findInstalledClient() {
     return running === exeKey;
   });
   return chosen;
+}
+
+function findLinuxClient() {
+  const found = [];
+  const seen = new Set();
+  for (const dir of linuxInstallDirs(process.env)) {
+    const candidate = linuxClientCandidate(dir);
+    if (!candidate || seen.has(candidate.exe)) continue;
+    seen.add(candidate.exe);
+    found.push(candidate);
+  }
+  const chosen = chooseClient(found);
+  if (!chosen.client) return chosen;
+  chosen.client.running = linuxExeRunning(chosen.client.exe);
+  return chosen;
+}
+
+function linuxExeRunning(exe) {
+  let target = exe;
+  try {
+    target = fs.realpathSync(exe);
+  } catch {
+    return false;
+  }
+  let entries = [];
+  try {
+    entries = fs.readdirSync('/proc');
+  } catch {
+    return false;
+  }
+  for (const entry of entries) {
+    if (!/^\d+$/.test(entry) || Number(entry) === process.pid) continue;
+    try {
+      if (fs.realpathSync(`/proc/${entry}/exe`) === target) return true;
+    } catch {
+      // This pid is not readable.
+    }
+  }
+  return false;
 }
 
 export const MUSIC_EXE_NAMES = ['YandexMusic.exe', 'Yandex Music.exe', 'Яндекс Музыка.exe'];

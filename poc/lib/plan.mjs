@@ -13,19 +13,61 @@ const BANNED = [
   'token',
 ];
 
+const LAUNCH_PLATFORMS = new Set(['win32', 'linux']);
+
 export function decideRun({ platform, client, alreadyRunning }) {
-  if (platform !== 'win32') return { launch: false, code: 'not-windows' };
+  if (!LAUNCH_PLATFORMS.has(platform)) return { launch: false, code: 'not-windows' };
   if (!client) return { launch: false, code: 'client-not-found' };
   if (alreadyRunning) return { launch: false, code: 'already-running' };
   return { launch: true, code: 'launch' };
 }
 
-export function buildLaunchArgs(port) {
+export function isWindowsExePath(exe) {
+  return /^[A-Za-z]:[\\/]/.test(String(exe || '')) || String(exe || '').includes('\\');
+}
+
+export function buildLaunchArgs(port, extras = []) {
   return [
     `--remote-debugging-port=${port}`,
     '--remote-debugging-address=127.0.0.1',
     `--remote-allow-origins=http://127.0.0.1:${port}`,
+    ...extras,
   ];
+}
+
+export function parseProcNet(text) {
+  const rows = [];
+  for (const line of String(text).split(/\r?\n/)) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 10) continue;
+    if (!/^[0-9A-Fa-f]+:[0-9A-Fa-f]+$/.test(parts[1])) continue;
+    if (parts[3].toUpperCase() !== '0A') continue;
+    const [hexAddress, hexPort] = parts[1].split(':');
+    const address = decodeProcAddress(hexAddress);
+    const port = Number.parseInt(hexPort, 16);
+    const inode = Number(parts[9]);
+    if (!address || !Number.isInteger(port) || !Number.isInteger(inode)) continue;
+    rows.push({ address, port, inode });
+  }
+  return rows;
+}
+
+function decodeProcAddress(hex) {
+  if (hex.length === 8) {
+    const value = Number.parseInt(hex, 16);
+    if (!Number.isInteger(value)) return '';
+    return `${value & 0xff}.${(value >> 8) & 0xff}.${(value >> 16) & 0xff}.${(value >> 24) & 0xff}`;
+  }
+  if (hex.length !== 32) return '';
+  const bytes = [];
+  for (let index = 0; index < 4; index += 1) {
+    const value = Number.parseInt(hex.slice(index * 8, index * 8 + 8), 16);
+    if (!Number.isInteger(value)) return '';
+    bytes.push(value & 0xff, (value >> 8) & 0xff, (value >> 16) & 0xff, (value >> 24) & 0xff);
+  }
+  if (bytes.every((byte) => byte === 0)) return '::';
+  if (bytes[15] === 1 && bytes.slice(0, 15).every((byte) => byte === 0)) return '::1';
+  return 'ipv6';
 }
 
 export function parseNetstat(text) {
