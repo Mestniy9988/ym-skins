@@ -1,7 +1,9 @@
 import { insertAppearance, probeAppearance, removeAppearance } from './appearance.mjs';
+import { installSkinStyle, probeTestSkin } from './apply-skin.mjs';
 import { probeHideNav } from './nav.mjs';
 import { clearStamps, stampElements } from './runtime-stamp.mjs';
 import { selectorMapFor } from './selector-map.mjs';
+import { auditSkinCss, testSkinCss } from './skin-css.mjs';
 
 export const POC_BACKGROUND = 'rgb(58, 24, 72)';
 export const POC_BUTTON = 'rgb(232, 255, 71)';
@@ -19,7 +21,7 @@ export function pickButton(document) {
 }
 
 export function pageExpression(fn) {
-  return `(() => {\nconst POC_BACKGROUND = ${JSON.stringify(POC_BACKGROUND)};\nconst POC_BUTTON = ${JSON.stringify(POC_BUTTON)};\n${pickButton.toString()}\n${readSurface.toString()}\n${insertAppearance.toString()}\n${removeAppearance.toString()}\n${probeAppearance.toString()}\n${probeHideNav.toString()}\n${stampElements.toString()}\n${clearStamps.toString()}\nreturn (${fn.toString()})(document, getComputedStyle, ${JSON.stringify(selectorMapFor('5.121.2'))});\n})()`;
+  return `(() => {\nconst POC_BACKGROUND = ${JSON.stringify(POC_BACKGROUND)};\nconst POC_BUTTON = ${JSON.stringify(POC_BUTTON)};\n${pickButton.toString()}\n${readSurface.toString()}\n${insertAppearance.toString()}\n${removeAppearance.toString()}\n${probeAppearance.toString()}\n${probeHideNav.toString()}\n${stampElements.toString()}\n${clearStamps.toString()}\n${testSkinCss.toString()}\n${auditSkinCss.toString()}\n${installSkinStyle.toString()}\n${probeTestSkin.toString()}\nreturn (${fn.toString()})(document, getComputedStyle, ${JSON.stringify(selectorMapFor('5.121.2'))});\n})()`;
 }
 
 export function readSurface(document, getComputedStyle) {
@@ -192,5 +194,12 @@ export function menuProbe(document, getComputedStyle, map) {
   const cleared = clearStamps(document);
   result.stampApplied = stamped.stamped;
   result.stampCleared = cleared.cleared;
+
+  const skin = probeTestSkin(document, map, getComputedStyle);
+  result.skinStamped = skin.stamped;
+  result.skinStyleApplied = skin.styleApplied;
+  result.skinPlayColored = skin.playColored;
+  result.skinStyleRemoved = skin.styleRemoved;
+  result.skinStampsCleared = skin.stampsCleared;
   return result;
 }

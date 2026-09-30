@@ -20,6 +20,7 @@ test('region page with a map stays in safe mode and does not claim a live spectr
   assert.equal(facts.audioChoice.source, 'decorative');
   assert.equal(facts.spectrum.state, 'silent');
   assert.deepEqual(facts.injection, { allowed: true, reason: 'clear' });
+  assert.equal(facts.compatStatus.code, 'safe');
   const text = buildReport(facts);
   assert.match(text, /безопасный режим/);
   assert.match(text, /декоративная анимация/);
@@ -49,6 +50,7 @@ test('kill switch blocks the read version and a live analyser wins over loopback
   assert.equal(facts.updateDecision.action, 'keep');
   assert.equal(facts.audioChoice.source, 'analyser');
   assert.equal(facts.injection.allowed, false);
+  assert.equal(facts.compatStatus.code, 'blocked');
   const text = buildReport(facts);
   assert.match(text, /полный режим допустим/);
   assert.match(text, /снимок не изменился/);
@@ -67,6 +69,7 @@ test('changed version without a map waits instead of reusing a failed previous s
   });
   assert.equal(facts.smoke.status, 'no-map');
   assert.equal(facts.updateDecision.action, 'awaiting-map');
+  assert.equal(facts.compatStatus.code, 'waiting');
 });
 
 test('a passing previous smoke is the fallback when the current map is missing', () => {

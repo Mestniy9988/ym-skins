@@ -46,7 +46,7 @@ export function buildReport(facts = {}) {
     '',
     '## 6. Меню и блок настроек',
     '',
-    menuSection(facts.menu, facts.selectorMap, facts.selectorScan, facts.smoke),
+    menuSection(facts.menu, facts.selectorMap, facts.selectorScan, facts.smoke, facts.compatStatus),
     '',
     '## Фон, кнопка и перезапуск',
     '',
@@ -300,7 +300,7 @@ function safeAuthority(value) {
   return value.replace(/[^\w .+-]/g, '').slice(0, 80).trim();
 }
 
-function menuSection(menu, selectorMap, selectorScan, smoke) {
+function menuSection(menu, selectorMap, selectorScan, smoke, compatStatus) {
   const mapVersion = safeMapVersion(selectorMap);
   if (!menu) {
     const scanLine = formatSelectorScan(selectorScan);
@@ -374,7 +374,33 @@ function menuSection(menu, selectorMap, selectorScan, smoke) {
   if (smokeLine) lines.push(smokeLine);
   const stampLine = formatStamp(menu);
   if (stampLine) lines.push(stampLine);
+  const skinLine = formatSkin(menu);
+  if (skinLine) lines.push(skinLine);
+  const compatLine = formatCompat(compatStatus);
+  if (compatLine) lines.push(compatLine);
   return lines.join('\n');
+}
+
+function formatSkin(menu) {
+  if (!Number.isInteger(menu?.skinStamped)) return '';
+  if (menu.skinStamped === 0) {
+    return 'Тестовый стиль по меткам data-yms не ставился: узлов для него нет.';
+  }
+  if (menu.skinStyleApplied && menu.skinStyleRemoved && menu.skinStampsCleared && menu.skinPlayColored) {
+    return 'Тестовый стиль по меткам data-yms покрасил кнопку Play и сразу снят.';
+  }
+  if (menu.skinStyleApplied && menu.skinStyleRemoved && menu.skinStampsCleared) {
+    return 'Тестовый стиль по меткам data-yms поставлен и снят. Цвет кнопки Play не подтверждён.';
+  }
+  return 'Проба тестового стиля не подтвердила снятие.';
+}
+
+function formatCompat(status) {
+  if (status?.code === 'compatible') return 'Статус совместимости: Совместимо.';
+  if (status?.code === 'safe') return 'Статус совместимости: Безопасный режим.';
+  if (status?.code === 'waiting') return 'Статус совместимости: Ожидается обновление.';
+  if (status?.code === 'blocked') return 'Статус совместимости: Внедрение выключено.';
+  return '';
 }
 
 function formatStamp(menu) {

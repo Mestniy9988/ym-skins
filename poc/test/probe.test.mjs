@@ -512,9 +512,15 @@ test('menu probe expression hides a mapped item without module scope', () => {
   const ids = selectorMapFor('5.121.2').elements['nav.hidden'];
   for (const id of ids) assert.equal(source.includes(`'${id}'`), true);
   assert.equal(source.includes('data-yms-stamp'), true);
+  assert.equal(source.includes('ym-skins-runtime'), true);
   assert.equal(result.stampCleared, result.stampApplied);
+  assert.equal(result.skinStamped > 0, true);
+  assert.equal(result.skinStyleApplied, true);
+  assert.equal(result.skinStyleRemoved, true);
+  assert.equal(result.skinStampsCleared, true);
   assert.equal(item.attrs['data-yms'], undefined);
   assert.equal(list.attrs['data-yms'], undefined);
+  assert.equal(doc.getElementById('ym-skins-runtime'), null);
 });
 
 test('menu probe does not hide an unnamed nav child', () => {

@@ -1,4 +1,5 @@
 import { chooseAudioSource } from './audio-source.mjs';
+import { compatibilityStatus } from './compat-status.mjs';
 import { smokeSelectors } from './compat.mjs';
 import { injectionAllowed } from './kill-switch.mjs';
 import { combineMacSign } from './macos-sign.mjs';
@@ -38,6 +39,11 @@ export function attachStage1Decisions(facts = {}) {
   if (facts.macCodesign != null || facts.macSpctl != null) {
     next.macSign = combineMacSign(facts.macCodesign ?? '', facts.macSpctl ?? '');
   }
+  next.compatStatus = compatibilityStatus({
+    smoke: next.smoke,
+    updateDecision: next.updateDecision,
+    injection: next.injection,
+  });
   return next;
 }
 
