@@ -15,7 +15,7 @@ import {
   Volume2,
   X,
 } from 'lucide-react'
-import { fmtTime, SKINS, TRACKS, type Skin, type Track } from '@/data/skins'
+import { fmtTime, SKINS, TRACKS, themeAt, type Skin, type Track } from '@/data/skins'
 import { Decor } from './Decor'
 import { HeroArt } from './Hero'
 import { MiniPlayer } from './MiniPlayer'
@@ -284,7 +284,7 @@ function SettingsPage(p: MockProps) {
         <div className="ym-skin-picker" data-disabled={p.original}>
           <div className="ym-skin-grid">
             {SKINS.map((s) => {
-              const theme = s.themes[s.id === pending.skinId ? pending.themeIdx : 0]
+              const theme = themeAt(s, s.id === pending.skinId ? pending.themeIdx : 0)
               return (
                 <button
                   key={s.id}
@@ -314,7 +314,7 @@ function SettingsPage(p: MockProps) {
             <div className="ym-set-label">Окно примера</div>
             <div className="ym-skin-preview-stage">
               <div className="ym-skin-preview-scale">
-                <MiniPlayer {...p} skin={pendingSkin} theme={pendingSkin.themes[pending.themeIdx]} compact />
+                <MiniPlayer {...p} skin={pendingSkin} theme={themeAt(pendingSkin, pending.themeIdx)} compact />
               </div>
             </div>
             <div className="ym-skin-preview-meta">
@@ -406,7 +406,7 @@ export function AppMock(props: MockProps) {
   const lcdText = `${TRACKS.findIndex((t) => t.id === track.id) + 1}. ${track.artist} — ${track.title} (${fmtTime(track.dur)}) *** `
 
   return (
-    <div className="ym ym-min" data-skin={skin.id} data-page={page} data-playing={playing} data-anim={animate ? 'on' : 'off'} style={skinStyle(theme, track)}>
+    <div className="ym ym-min" data-skin={skin.id} data-theme={theme.id} data-page={page} data-playing={playing} data-anim={animate ? 'on' : 'off'} style={skinStyle(theme, track)}>
       <Decor skinId={skin.id} />
       <div className="ym-titlebar">
         <div className="ym-dots">

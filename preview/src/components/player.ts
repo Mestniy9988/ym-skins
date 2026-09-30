@@ -30,6 +30,8 @@ export const LCD_FONT: Record<string, string> = {
   arcade: '"Press Start 2P", monospace',
   winter: `VT323, 'Pixelify Sans', monospace`,
   adaptive: '"Inter Variable", sans-serif',
+  tarkov: `'Share Tech Mono', 'Inter Variable', monospace`,
+  tanks: `'Russo One', 'Inter Variable', sans-serif`,
   original: '"Inter Variable", sans-serif',
 }
 
