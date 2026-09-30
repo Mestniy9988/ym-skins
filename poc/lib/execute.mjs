@@ -1,6 +1,7 @@
 import { findAudioGraphMarkers } from './audio-graph.mjs';
 import { linuxDebugExtras } from './launch.mjs';
 import { readLoopback } from './loopback.mjs';
+import { collectTestIds, scanTestIds } from './selector-scan.mjs';
 import { selectorMapFor } from './selector-map.mjs';
 import { POC_BACKGROUND, POC_BUTTON } from './page.mjs';
 import { buildLaunchArgs, sameColor } from './plan.mjs';
@@ -32,6 +33,9 @@ export async function executeProbe(env, deps) {
     if (audioGraph) full.audioGraph = audioGraph;
     const selectorMap = selectorMapFor(facts.versions?.asar);
     if (selectorMap) full.selectorMap = selectorMap;
+    if (selectorMap && client.asar) {
+      full.selectorScan = safeScan(client.asar, collectTestIds(selectorMap));
+    }
     if (facts.platform === 'linux') full.loopback = readLoopback();
     return { exitCode, markdown: buildReport(full), facts: full };
   };
@@ -229,6 +233,14 @@ async function failureFacts({ platform, client, fuses, versions, update, asarBef
     launch: { port, loopback: true, error: error?.message || 'inspect failed' },
     asar: await archiveHashes(deps, client, asarBefore),
   };
+}
+
+function safeScan(file, ids) {
+  try {
+    return scanTestIds(file, ids);
+  } catch {
+    return null;
+  }
 }
 
 async function safeCall(fn) {

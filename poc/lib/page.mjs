@@ -1,3 +1,6 @@
+import { insertAppearance, probeAppearance, removeAppearance } from './appearance.mjs';
+import { probeHideNav } from './nav.mjs';
+
 export const POC_BACKGROUND = 'rgb(58, 24, 72)';
 export const POC_BUTTON = 'rgb(232, 255, 71)';
 
@@ -14,7 +17,7 @@ export function pickButton(document) {
 }
 
 export function pageExpression(fn) {
-  return `(() => {\nconst POC_BACKGROUND = ${JSON.stringify(POC_BACKGROUND)};\nconst POC_BUTTON = ${JSON.stringify(POC_BUTTON)};\n${pickButton.toString()}\n${readSurface.toString()}\nreturn (${fn.toString()})(document, getComputedStyle);\n})()`;
+  return `(() => {\nconst POC_BACKGROUND = ${JSON.stringify(POC_BACKGROUND)};\nconst POC_BUTTON = ${JSON.stringify(POC_BUTTON)};\n${pickButton.toString()}\n${readSurface.toString()}\n${insertAppearance.toString()}\n${removeAppearance.toString()}\n${probeAppearance.toString()}\n${probeHideNav.toString()}\nreturn (${fn.toString()})(document, getComputedStyle);\n})()`;
 }
 
 export function readSurface(document, getComputedStyle) {
@@ -147,34 +150,22 @@ export function menuProbe(document, getComputedStyle) {
     result.bodyInsertRemoved = result.bodyInsertRemoved && !document.getElementById(probe.id);
   }
 
-  const hiddenIds = [
+  const placed = probeAppearance(document);
+  result.appearanceInserted = placed.inserted;
+  result.appearanceFirst = placed.firstChild;
+  result.appearanceRemoved = placed.removed;
+
+  const hidden = probeHideNav(document, getComputedStyle, [
     'NAVBAR_NAVIGATION_ITEM_KIDS',
     'NAVBAR_NAVIGATION_ITEM_NON_MUSIC',
     'NAVBAR_NAVIGATION_ITEM_CONCERTS',
     'NAVBAR_NAVIGATION_ITEM_PLUS',
     'NAVBAR_NAVIGATION_ITEM_MUZMARKET',
     'NAVBAR_NAVIGATION_ITEM_FOR_YOU_AND_TRENDS',
-  ];
-  let child = null;
-  for (const id of hiddenIds) {
-    const node = document.querySelector(`[data-test-id="${id}"]`);
-    if (!node) continue;
-    child = node;
-    result.hiddenTestId = id;
-    break;
-  }
-  if (child) {
-    result.hideTried = true;
-    const previous = child.style.display;
-    try {
-      child.setAttribute('data-yms-poc-hide', '1');
-      child.style.display = 'none';
-      result.hideApplied = getComputedStyle(child).display === 'none';
-    } finally {
-      child.style.display = previous;
-      child.removeAttribute('data-yms-poc-hide');
-      result.hideReverted = getComputedStyle(child).display !== 'none';
-    }
-  }
+  ]);
+  result.hideTried = hidden.hideTried;
+  result.hideApplied = hidden.hideApplied;
+  result.hideReverted = hidden.hideReverted;
+  if (hidden.hiddenTestId) result.hiddenTestId = hidden.hiddenTestId;
   return result;
 }

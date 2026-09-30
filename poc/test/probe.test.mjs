@@ -468,6 +468,48 @@ test('menu probe hides one known nav item and puts the page back', () => {
   assert.equal(doc.getElementById('ym-skins-poc-settings-probe'), null);
 });
 
+test('menu probe puts appearance first in the settings list and takes it back', () => {
+  const sibling = element('div');
+  sibling.attrs['data-test-id'] = 'SETTINGS_SOUND';
+  const list = element('div');
+  list.attrs['data-test-id'] = 'SETTINGS_LIST';
+  list.children.push(sibling);
+  sibling.parent = list;
+  const doc = fakeDocument({ body: element('body'), head: element('head'), extras: [list] });
+  const result = menuProbe(doc, computed);
+  assert.equal(result.settingsListFound, true);
+  assert.equal(result.settingsPageOpened, true);
+  assert.equal(result.appearanceInserted, true);
+  assert.equal(result.appearanceFirst, true);
+  assert.equal(result.appearanceRemoved, true);
+  assert.equal(doc.getElementById('ym-skins-appearance'), null);
+  assert.equal(list.firstChild, sibling);
+  assert.equal(list.children.some((child) => child.id === 'ym-skins-appearance'), false);
+});
+
+test('menu probe expression hides a mapped item without module scope', () => {
+  const source = pageExpression(menuProbe);
+  assert.equal(auditExpression(source), null);
+  const item = element('a');
+  item.style.display = 'block';
+  item.attrs['data-test-id'] = 'NAVBAR_NAVIGATION_ITEM_PLUS';
+  const list = element('div');
+  list.attrs['data-test-id'] = 'SETTINGS_LIST';
+  const doc = fakeDocument({ body: element('body'), head: element('head'), extras: [list, item] });
+  const result = vm.runInNewContext(source, { document: doc, getComputedStyle: computed });
+  assert.equal(result.hideTried, true);
+  assert.equal(result.hiddenTestId, 'NAVBAR_NAVIGATION_ITEM_PLUS');
+  assert.equal(result.hideApplied, true);
+  assert.equal(result.hideReverted, true);
+  assert.equal(result.appearanceInserted, true);
+  assert.equal(result.appearanceRemoved, true);
+  assert.equal(item.style.display, 'block');
+  assert.equal(item.attrs['data-yms-poc-hide'], undefined);
+  assert.equal(doc.getElementById('ym-skins-appearance'), null);
+  const ids = selectorMapFor('5.121.2').elements['nav.hidden'];
+  for (const id of ids) assert.equal(source.includes(`'${id}'`), true);
+});
+
 test('menu probe does not hide an unnamed nav child', () => {
   const item = element('a');
   item.style.display = 'block';
@@ -699,6 +741,35 @@ test('report describes a silent running analyser and a missing loopback device',
   assert.match(text, /Карта селекторов 5\.121\.2/);
   assert.match(text, /Отладчик отдал одну страницу/);
   assert.equal(text.includes('Системный loopback не проверялся'), false);
+});
+
+test('report records a reversible appearance block and archive id scan', () => {
+  const text = buildReport({
+    platform: 'linux',
+    decision: 'launch',
+    versions: { asar: '5.121.2' },
+    selectorMap: selectorMapFor('5.121.2'),
+    selectorScan: { found: ['NAVBAR', 'SETTINGS_LIST'], missing: ['NAVBAR_NAVIGATION_ITEM_KIDS'] },
+    menu: {
+      navCount: 1,
+      hideTried: true,
+      hideApplied: true,
+      hideReverted: true,
+      hiddenTestId: 'NAVBAR_NAVIGATION_ITEM_KIDS',
+      navbarFound: true,
+      settingsListFound: true,
+      settingsPageOpened: true,
+      appearanceInserted: true,
+      appearanceFirst: true,
+      appearanceRemoved: true,
+      regionScreen: false,
+      bodyInsertRemoved: true,
+    },
+  });
+  assert.match(text, /блок «Оформление» первым в SETTINGS_LIST/);
+  assert.match(text, /NAVBAR_NAVIGATION_ITEM_KIDS/);
+  assert.match(text, /Найдены: 2/);
+  assert.equal(text.includes('не встраивался'), false);
 });
 
 test('a finished windows run reports fuses, re-injection and an untouched archive', () => {
@@ -1199,11 +1270,25 @@ function element(tag) {
     removeAttribute(key) {
       delete this.attrs[key];
     },
+    get firstChild() {
+      return this.children[0] || null;
+    },
     appendChild(child) {
       this.children.push(child);
+      child.parent = this;
+      if (this.owner?.note) this.owner.note(child);
+    },
+    insertBefore(child, before) {
+      const index = before ? this.children.indexOf(before) : -1;
+      if (index < 0) this.children.push(child);
+      else this.children.splice(index, 0, child);
+      child.parent = this;
+      if (this.owner?.note) this.owner.note(child);
     },
     remove() {
       this.removed = true;
+      const index = this.parent?.children?.indexOf(this) ?? -1;
+      if (index >= 0) this.parent.children.splice(index, 1);
     },
   };
 }
@@ -1289,5 +1374,10 @@ function fakeDocument({ body, head, buttons = [], navs = [], extras = [] }) {
     doc.note(child);
   };
   for (const button of buttons) button.owner = doc;
+  for (const extra of extras) extra.owner = doc;
+  for (const nav of navs) {
+    nav.owner = doc;
+    for (const child of nav.children || []) child.owner = doc;
+  }
   return doc;
 }

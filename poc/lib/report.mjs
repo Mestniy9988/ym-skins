@@ -46,7 +46,7 @@ export function buildReport(facts = {}) {
     '',
     '## 6. Меню и блок настроек',
     '',
-    menuSection(facts.menu, facts.selectorMap),
+    menuSection(facts.menu, facts.selectorMap, facts.selectorScan),
     '',
     '## Фон, кнопка и перезапуск',
     '',
@@ -239,11 +239,14 @@ function versionSection(facts) {
   return lines.join('\n');
 }
 
-function menuSection(menu, selectorMap) {
+function menuSection(menu, selectorMap, selectorScan) {
   const mapVersion = safeMapVersion(selectorMap);
   if (!menu) {
-    if (mapVersion) return `Карта селекторов ${mapVersion} есть. Страница меню не проверялась.`;
-    return 'Скрытие пунктов меню и блок в настройках: не проверено.';
+    const scanLine = formatSelectorScan(selectorScan);
+    const base = mapVersion
+      ? `Карта селекторов ${mapVersion} есть. Страница меню не проверялась.`
+      : 'Скрытие пунктов меню и блок в настройках: не проверено.';
+    return scanLine ? `${base}\n${scanLine}` : base;
   }
   const lines = [];
   if (menu.regionScreen) {
@@ -275,7 +278,15 @@ function menuSection(menu, selectorMap) {
     lines.push(menu.pageCount === 1 ? 'Отладчик отдал одну страницу.' : `Отладчик отдал страниц: ${menu.pageCount}.`);
   }
   if (menu.settingsListFound) {
-    lines.push('На странице есть список настроек SETTINGS_LIST. Блок «Оформление» этим прогоном не встраивался.');
+    if (menu.appearanceInserted === true && menu.appearanceFirst === true && menu.appearanceRemoved === true) {
+      lines.push('Обратимая проба поставила блок «Оформление» первым в SETTINGS_LIST и сразу сняла его.');
+    } else if (menu.appearanceInserted === true && menu.appearanceRemoved === false) {
+      lines.push('Проба поставила блок «Оформление» в SETTINGS_LIST и не сняла его.');
+    } else if (menu.appearanceInserted === false) {
+      lines.push('На странице есть список настроек SETTINGS_LIST. Блок «Оформление» в начало списка не встал.');
+    } else {
+      lines.push('На странице есть список настроек SETTINGS_LIST. Блок «Оформление» этим прогоном не встраивался.');
+    }
   } else if (menu.settingsPageOpened) {
     lines.push('Страница настроек открывалась. Блок «Оформление» этим прогоном не встраивался.');
   } else if (menu.settingsListFound === false) {
@@ -286,7 +297,19 @@ function menuSection(menu, selectorMap) {
   if (menu.bodyInsertRemoved) {
     lines.push('В document.body узел ставится и тут же снимается. Это не раздел настроек.');
   }
+  const scanLine = formatSelectorScan(selectorScan);
+  if (scanLine) lines.push(scanLine);
   return lines.join('\n');
+}
+
+function formatSelectorScan(scan) {
+  if (!scan || !Array.isArray(scan.found) || !Array.isArray(scan.missing)) return '';
+  const ok = (id) => typeof id === 'string' && /^[A-Z0-9_]{1,80}$/.test(id);
+  const found = scan.found.filter(ok);
+  const missing = scan.missing.filter(ok);
+  if (found.length + missing.length === 0) return '';
+  if (missing.length === 0) return `В app.asar есть все ${found.length} id карты селекторов.`;
+  return `В app.asar нет id карты: ${missing.join(', ')}. Найдены: ${found.length}.`;
 }
 
 function safeMapVersion(selectorMap) {
