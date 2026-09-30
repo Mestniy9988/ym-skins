@@ -34,9 +34,11 @@ test('scanTestIds finds an id split across a 1 MiB chunk boundary', () => {
     const shortId = 'PLAY_BUTTON';
     const missingId = 'SETTINGS_LIST';
     const start = CHUNK - 10;
-    const buf = Buffer.alloc(start + splitId.length, 0x61);
-    buf.write(shortId, 20, 'latin1');
+    const buf = Buffer.alloc(start + splitId.length + 1, 0x61);
+    buf.write(`"${shortId}"`, 20, 'latin1');
+    buf.write('"', start - 1, 'latin1');
     buf.write(splitId, start, 'latin1');
+    buf.write('"', start + splitId.length, 'latin1');
     assert.ok(start < CHUNK);
     assert.ok(start + splitId.length > CHUNK);
     fs.writeFileSync(file, buf);
@@ -49,11 +51,24 @@ test('scanTestIds finds an id split across a 1 MiB chunk boundary', () => {
   }
 });
 
+test('scanTestIds ignores an id that is only a prefix of a longer one', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ym-selector-scan-'));
+  try {
+    const file = path.join(dir, 'ids.bin');
+    fs.writeFileSync(file, '"NAVBAR_NAVIGATION_ITEM_HOME"');
+    const result = scanTestIds(file, ['NAVBAR', 'NAVBAR_NAVIGATION_ITEM_HOME']);
+    assert.deepEqual(result.found, ['NAVBAR_NAVIGATION_ITEM_HOME']);
+    assert.deepEqual(result.missing, ['NAVBAR']);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('scanTestIds does not search lowercase or punctuation ids', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ym-selector-scan-'));
   try {
     const file = path.join(dir, 'ids.bin');
-    fs.writeFileSync(file, 'PLAY_BUTTON player.bar nope');
+    fs.writeFileSync(file, '"PLAY_BUTTON" player.bar nope');
     const result = scanTestIds(file, ['player.bar', 'PLAY_BUTTON', 'nope', 'ABSENT_ID']);
     assert.deepEqual(result.found, ['PLAY_BUTTON']);
     assert.deepEqual(result.missing, ['ABSENT_ID']);
@@ -70,7 +85,7 @@ test('scanTestIds reports only the first 64 valid ids', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ym-selector-scan-'));
   try {
     const file = path.join(dir, 'ids.bin');
-    fs.writeFileSync(file, 'zzA0zz');
+    fs.writeFileSync(file, 'zz"A0"zz');
     const ids = [];
     for (let i = 0; i < 65; i += 1) ids.push(`A${i}`);
     const result = scanTestIds(file, ids);

@@ -562,7 +562,11 @@ test('selector map is only the 5.121.2 ids read from that client', () => {
   assert.equal(map.elements.sidebar, 'NAVBAR');
   assert.equal(map.elements['nav.wave'], 'NAVBAR_NAVIGATION_ITEM_HOME');
   assert.equal(map.elements['nav.search'], 'NAVBAR_NAVIGATION_ITEM_SEARCH');
-  assert.equal(map.elements['settings.page'], 'SETTINGS_LIST');
+  assert.equal(map.elements['player.cover'], 'PLAYERBAR_DESKTOP_COVER_CONTAINER');
+  assert.equal(map.elements['player.pause'], 'PAUSE_BUTTON');
+  assert.equal(map.elements['settings.page'], 'SETTINGS_PAGE');
+  assert.equal(map.elements['settings.list'], 'SETTINGS_LIST');
+  assert.equal(map.elements['settings.equalizer'], 'SETTINGS_EQUALIZER_BUTTON');
   assert.equal(map.elements['nav.hidden'].includes('NAVBAR_NAVIGATION_ITEM_KIDS'), true);
   assert.equal(map.settingsPath, '/settings');
   assert.equal(selectorMapFor('5.0.0'), null);

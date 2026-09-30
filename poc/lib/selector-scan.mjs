@@ -2,7 +2,7 @@ import fs from 'node:fs';
 
 const ID_RE = /^[A-Z0-9_]{1,80}$/;
 const CHUNK = 1024 * 1024;
-const OVERLAP = 64;
+const OVERLAP = 96;
 const MAX_IDS = 64;
 
 function isTestId(value) {
@@ -50,7 +50,7 @@ export function scanTestIds(file, ids) {
         if (fs.readSync(fd, buf, 0, buf.length, pos) !== buf.length) break;
         const text = Buffer.concat([carry, buf]).toString('latin1');
         for (let i = 0; i < accepted.length; i += 1) {
-          if (hit[i] || !text.includes(accepted[i])) continue;
+          if (hit[i] || !text.includes(`"${accepted[i]}"`)) continue;
           hit[i] = true;
           remaining -= 1;
         }

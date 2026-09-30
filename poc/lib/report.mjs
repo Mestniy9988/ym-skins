@@ -308,7 +308,7 @@ function formatSelectorScan(scan) {
   const found = scan.found.filter(ok);
   const missing = scan.missing.filter(ok);
   if (found.length + missing.length === 0) return '';
-  if (missing.length === 0) return `В app.asar есть все ${found.length} id карты селекторов.`;
+  if (missing.length === 0) return `В app.asar есть отдельные строки всех ${found.length} id карты селекторов.`;
   return `В app.asar нет id карты: ${missing.join(', ')}. Найдены: ${found.length}.`;
 }
 
