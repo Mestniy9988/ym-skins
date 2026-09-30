@@ -206,6 +206,7 @@ async function readApplied(cdp, apply) {
       spectrumPeak: playback ? playback.peak : null,
       contextRunning: playback && Number.isInteger(playback.running) ? playback.running : null,
       fftSize: playback && Number.isInteger(playback.fftSize) ? playback.fftSize : null,
+      bins: sanitizeBins(playback?.bins),
       spectrumRead: Boolean(playback && playback.peak > 0),
     },
     menu,
@@ -289,6 +290,16 @@ async function evaluate(cdp, expression) {
   return response.result?.value;
 }
 
+function sanitizeBins(bins) {
+  if (!Array.isArray(bins) || bins.length === 0 || bins.length > 32) return null;
+  const out = [];
+  for (const value of bins) {
+    if (!Number.isInteger(value) || value < 0 || value > 255) return null;
+    out.push(value);
+  }
+  return out;
+}
+
 async function readPlaybackSpectrum(cdp) {
   let protoId = null;
   let objectsId = null;
@@ -315,6 +326,7 @@ async function readPlaybackSpectrum(cdp) {
       peak,
       running: Number.isInteger(value.running) ? value.running : null,
       fftSize: Number.isInteger(value.fftSize) ? value.fftSize : null,
+      bins: sanitizeBins(value.bins),
     };
   } catch {
     return null;

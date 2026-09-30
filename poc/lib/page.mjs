@@ -106,6 +106,7 @@ export function readAnalyserPeaks() {
   let running = 0;
   let fftSize = null;
   let fftMixed = false;
+  let best = null;
   for (let index = 0; index < limit; index += 1) {
     const node = this[index];
     if (!node || typeof node.getByteFrequencyData !== 'function') continue;
@@ -118,11 +119,26 @@ export function readAnalyserPeaks() {
     if (!count) continue;
     const bins = new Uint8Array(count);
     node.getByteFrequencyData(bins);
+    let local = 0;
+    const sample = [];
+    const cap = Math.min(bins.length, 32);
     for (let bin = 0; bin < bins.length; bin += 1) {
-      if (bins[bin] > peak) peak = bins[bin];
+      if (bins[bin] > local) local = bins[bin];
+      if (bin < cap) sample.push(bins[bin]);
     }
+    if (sample.length > 0 && local > sample[sample.length - 1] && local > Math.max(...sample)) {
+      sample[sample.length - 1] = local;
+    }
+    if (local > peak) peak = local;
+    if (!best || local > best.local) best = { local, sample };
   }
-  return { count: total, peak, running, fftSize: fftMixed ? null : fftSize };
+  return {
+    count: total,
+    peak,
+    running,
+    fftSize: fftMixed ? null : fftSize,
+    bins: best ? best.sample : [],
+  };
 }
 
 export function menuProbe(document, getComputedStyle) {
@@ -135,6 +151,8 @@ export function menuProbe(document, getComputedStyle) {
     hideReverted: false,
     navbarFound: Boolean(document.querySelector('[data-test-id="NAVBAR"]')),
     settingsListFound: Boolean(document.querySelector('[data-test-id="SETTINGS_LIST"]')),
+    playerBarFound: Boolean(document.querySelector('[data-test-id="PLAYERBAR_DESKTOP"]')),
+    playerPlayFound: Boolean(document.querySelector('[data-test-id="PLAY_BUTTON"]')),
     settingsPageOpened: false,
     regionScreen: /not available in your region/i.test(pageText),
     bodyInsertRemoved: false,

@@ -53,6 +53,7 @@ import {
   sameColor,
 } from '../lib/plan.mjs';
 import { buildReport } from '../lib/report.mjs';
+import { attachStage1Decisions } from '../lib/stage1-decisions.mjs';
 import { compareSnapshots } from '../lib/snapshot.mjs';
 import { decodeFrames, encodeControlFrame, encodeTextFrame } from '../lib/ws.mjs';
 
@@ -462,6 +463,8 @@ test('menu probe hides one known nav item and puts the page back', () => {
   assert.equal(result.bodyInsertRemoved, true);
   assert.equal(result.navbarFound, false);
   assert.equal(result.settingsListFound, false);
+  assert.equal(result.playerBarFound, false);
+  assert.equal(result.playerPlayFound, false);
   assert.equal(result.regionScreen, false);
   assert.equal(item.style.display, 'block');
   assert.equal(item.attrs['data-yms-poc-hide'], undefined);
@@ -530,9 +533,46 @@ test('region screen is recorded and a navbar test id is visible to the probe', (
   const result = menuProbe(doc, computed);
   assert.equal(result.regionScreen, true);
   assert.equal(result.navbarFound, true);
+  assert.equal(result.playerBarFound, false);
+  assert.equal(result.playerPlayFound, false);
   assert.equal(result.settingsListFound, false);
   assert.equal(result.settingsPageOpened, false);
   assert.equal(result.hideTried, false);
+});
+
+test('a page with the player, navbar and settings list passes smoke', () => {
+  const bar = element('div');
+  bar.attrs['data-test-id'] = 'PLAYERBAR_DESKTOP';
+  const play = element('button');
+  play.attrs['data-test-id'] = 'PLAY_BUTTON';
+  const nav = element('div');
+  nav.attrs['data-test-id'] = 'NAVBAR';
+  const list = element('div');
+  list.attrs['data-test-id'] = 'SETTINGS_LIST';
+  const doc = fakeDocument({
+    body: element('body'),
+    head: element('head'),
+    buttons: [play],
+    extras: [bar, nav, list],
+  });
+  const menu = menuProbe(doc, computed);
+  assert.equal(menu.playerBarFound, true);
+  assert.equal(menu.playerPlayFound, true);
+  assert.equal(menu.navbarFound, true);
+  assert.equal(menu.settingsListFound, true);
+  assert.equal(doc.getElementById('ym-skins-appearance'), null);
+  const facts = attachStage1Decisions({
+    selectorMap: selectorMapFor('5.121.2'),
+    menu,
+    analyser: { analyserCount: 1, spectrumPeak: 0, bins: [0, 0, 4] },
+    loopback: { status: 'no-device' },
+  });
+  assert.equal(facts.smoke.status, 'compatible');
+  assert.equal(facts.audioChoice.source, 'analyser');
+  const text = buildReport({ menu, selectorMap: selectorMapFor('5.121.2'), ...facts });
+  assert.match(text, /PLAYERBAR_DESKTOP на странице есть/);
+  assert.match(text, /PLAY_BUTTON на странице есть/);
+  assert.match(text, /полный режим допустим/);
 });
 
 test('analyser peaks come from existing nodes only', () => {
@@ -544,7 +584,13 @@ test('analyser peaks come from existing nodes only', () => {
       bins.set([0, 12, 3, 0]);
     },
   }];
-  assert.deepEqual(readAnalyserPeaks.call(loud), { count: 1, peak: 12, running: 1, fftSize: 32 });
+  assert.deepEqual(readAnalyserPeaks.call(loud), {
+    count: 1,
+    peak: 12,
+    running: 1,
+    fftSize: 32,
+    bins: [0, 12, 3, 0],
+  });
   const quiet = [{
     frequencyBinCount: 2,
     fftSize: 32,
@@ -553,8 +599,28 @@ test('analyser peaks come from existing nodes only', () => {
       bins.fill(0);
     },
   }];
-  assert.deepEqual(readAnalyserPeaks.call(quiet), { count: 1, peak: 0, running: 0, fftSize: 32 });
-  assert.deepEqual(readAnalyserPeaks.call([]), { count: 0, peak: 0, running: 0, fftSize: null });
+  assert.deepEqual(readAnalyserPeaks.call(quiet), {
+    count: 1,
+    peak: 0,
+    running: 0,
+    fftSize: 32,
+    bins: [0, 0],
+  });
+  assert.deepEqual(readAnalyserPeaks.call([]), { count: 0, peak: 0, running: 0, fftSize: null, bins: [] });
+  const wide = new Array(40).fill(0);
+  wide[39] = 9;
+  const far = [{
+    frequencyBinCount: 40,
+    fftSize: 64,
+    context: { state: 'running' },
+    getByteFrequencyData(bins) {
+      bins.set(wide);
+    },
+  }];
+  const farPeaks = readAnalyserPeaks.call(far);
+  assert.equal(farPeaks.peak, 9);
+  assert.equal(farPeaks.bins.length, 32);
+  assert.equal(Math.max(...farPeaks.bins), 9);
 });
 
 test('selector map is only the 5.121.2 ids read from that client', () => {

@@ -318,6 +318,16 @@ function menuSection(menu, selectorMap, selectorScan, smoke) {
   } else if (menu.navbarFound === false) {
     lines.push('Боковая навигация NAVBAR на странице не найдена.');
   }
+  if (menu.playerBarFound === true) {
+    lines.push('Панель плеера PLAYERBAR_DESKTOP на странице есть.');
+  } else if (menu.playerBarFound === false) {
+    lines.push('Панель плеера PLAYERBAR_DESKTOP на странице не найдена.');
+  }
+  if (menu.playerPlayFound === true) {
+    lines.push('Кнопка PLAY_BUTTON на странице есть.');
+  } else if (menu.playerPlayFound === false) {
+    lines.push('Кнопка PLAY_BUTTON на странице не найдена.');
+  }
   if (menu.hideTried) {
     const named = typeof menu.hiddenTestId === 'string' && /^[A-Z0-9_]{1,80}$/.test(menu.hiddenTestId)
       ? menu.hiddenTestId
