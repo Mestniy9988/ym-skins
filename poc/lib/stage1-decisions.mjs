@@ -3,6 +3,7 @@ import { compatibilityStatus } from './compat-status.mjs';
 import { smokeSelectors } from './compat.mjs';
 import { injectionAllowed } from './kill-switch.mjs';
 import { combineMacSign } from './macos-sign.mjs';
+import { skinGate } from './skin-gate.mjs';
 import { classifySpectrum } from './spectrum.mjs';
 import { decideUpdate } from './update-policy.mjs';
 
@@ -43,6 +44,11 @@ export function attachStage1Decisions(facts = {}) {
     smoke: next.smoke,
     updateDecision: next.updateDecision,
     injection: next.injection,
+  });
+  next.skinGate = skinGate({
+    smoke: next.smoke,
+    injection: next.injection,
+    original: facts.originalTheme === true,
   });
   return next;
 }
