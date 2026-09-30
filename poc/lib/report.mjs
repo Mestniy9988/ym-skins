@@ -34,7 +34,7 @@ export function buildReport(facts = {}) {
     '',
     '## 3. AnalyserNode',
     '',
-    analyserSection(facts.analyser, facts.audioGraph, facts.loopback),
+    analyserSection(facts.analyser, facts.audioGraph, facts.loopback, facts.audioChoice),
     '',
     '## 4. Где версия и как ловится обновление',
     '',
@@ -42,11 +42,11 @@ export function buildReport(facts = {}) {
     '',
     '## 5. Подпись macOS',
     '',
-    'Подпись macOS и Gatekeeper: не проверено. Этот прототип их не проверяет.',
+    macSection(facts.macSign),
     '',
     '## 6. Меню и блок настроек',
     '',
-    menuSection(facts.menu, facts.selectorMap, facts.selectorScan),
+    menuSection(facts.menu, facts.selectorMap, facts.selectorScan, facts.smoke),
     '',
     '## Фон, кнопка и перезапуск',
     '',
@@ -149,9 +149,11 @@ function fuseSection(fuses) {
   return lines.length > 0 ? lines.join('\n') : 'Electron Fuses: не проверено.';
 }
 
-function analyserSection(analyser, audioGraph, loopback) {
+function analyserSection(analyser, audioGraph, loopback, audioChoice) {
   if (!analyser && !audioGraph) {
-    return `Web Audio AnalyserNode: не проверено. ${loopbackLine(loopback)}`;
+    const base = `Web Audio AnalyserNode: не проверено. ${loopbackLine(loopback)}`;
+    const choice = audioChoiceLine(audioChoice);
+    return choice ? `${base} ${choice}` : base;
   }
   const lines = [];
   if (analyser) {
@@ -168,7 +170,18 @@ function analyserSection(analyser, audioGraph, loopback) {
   const graph = graphLine(audioGraph);
   if (graph) lines.push(graph);
   lines.push(loopbackLine(loopback));
+  const choice = audioChoiceLine(audioChoice);
+  if (choice) lines.push(choice);
   return lines.join(' ');
+}
+
+function audioChoiceLine(audioChoice) {
+  if (audioChoice?.source === 'analyser') return 'Источник визуализатора: AnalyserNode с живым спектром.';
+  if (audioChoice?.source === 'loopback') return 'Источник визуализатора: системный loopback.';
+  if (audioChoice?.source === 'decorative') {
+    return 'Источник визуализатора: декоративная анимация. Живого спектра и проверенного loopback нет.';
+  }
+  return '';
 }
 
 function loopbackLine(loopback) {
@@ -236,10 +249,58 @@ function versionSection(facts) {
   } else {
     lines.push('Факт обновления: не проверено.');
   }
+  const policy = updateDecisionLine(facts.updateDecision);
+  if (policy) lines.push(policy);
+  const gate = injectionLine(facts.injection);
+  if (gate) lines.push(gate);
   return lines.join('\n');
 }
 
-function menuSection(menu, selectorMap, selectorScan) {
+function updateDecisionLine(decision) {
+  if (decision?.action === 'keep') return 'Политика обновления: снимок не изменился, карта не переключается.';
+  if (decision?.action === 'apply-current-map') {
+    return 'Политика обновления: есть карта этой версии, её нужно проверить smoke-тестом.';
+  }
+  if (decision?.action === 'apply-previous-map') {
+    return 'Политика обновления: карты этой версии нет, пробуется карта предыдущей версии, её smoke уже проходил.';
+  }
+  if (decision?.action === 'awaiting-map') return 'Политика обновления: карты нет, полный скин ждёт карту.';
+  return '';
+}
+
+function injectionLine(injection) {
+  if (injection?.reason === 'clear') return 'Аварийный выключатель эту версию не блокирует.';
+  if (injection?.reason === 'kill-switch') return 'Аварийный выключатель запрещает внедрение для этой версии.';
+  if (injection?.reason === 'bad-flags') return 'Флаг каталога повреждён, внедрение запрещено.';
+  return '';
+}
+
+function macSection(macSign) {
+  const unread = 'Подпись macOS и Gatekeeper: не проверено. Этот прототип их не проверяет.';
+  if (!macSign || macSign.status === 'not-checked') return unread;
+  if (macSign.status === 'unsigned') {
+    return 'Подпись macOS: объект не подписан. Это разбор текста codesign, не прогон на macOS.';
+  }
+  if (macSign.status === 'rejected') {
+    return 'Gatekeeper по тексту spctl отклонил объект. Это не прогон на macOS.';
+  }
+  if (macSign.status === 'accepted') {
+    const authority = safeAuthority(macSign.authority);
+    const named = authority ? ` Подпись: ${authority}.` : '';
+    return `Подпись и Gatekeeper по тексту приняты.${named} Это разбор текста codesign, не прогон на macOS.`;
+  }
+  if (macSign.status === 'adhoc') {
+    return 'Подпись ad hoc, Gatekeeper по тексту принял. Это разбор текста codesign, не прогон на macOS.';
+  }
+  return 'Текст подписи macOS не разобран. Прогон на macOS не выполнялся.';
+}
+
+function safeAuthority(value) {
+  if (typeof value !== 'string') return '';
+  return value.replace(/[^\w .+-]/g, '').slice(0, 80).trim();
+}
+
+function menuSection(menu, selectorMap, selectorScan, smoke) {
   const mapVersion = safeMapVersion(selectorMap);
   if (!menu) {
     const scanLine = formatSelectorScan(selectorScan);
@@ -299,7 +360,18 @@ function menuSection(menu, selectorMap, selectorScan) {
   }
   const scanLine = formatSelectorScan(selectorScan);
   if (scanLine) lines.push(scanLine);
+  const smokeLine = formatSmoke(smoke);
+  if (smokeLine) lines.push(smokeLine);
   return lines.join('\n');
+}
+
+function formatSmoke(smoke) {
+  if (smoke?.status === 'compatible') return 'Smoke критичных элементов прошёл: полный режим допустим.';
+  if (smoke?.status === 'no-map') return 'Карты селекторов для открытой страницы нет. Полный скин не применяется.';
+  if (smoke?.status !== 'safe-mode') return '';
+  const missing = (smoke.missing || []).filter((name) => typeof name === 'string' && /^[a-z0-9.-]+$/i.test(name));
+  const listed = missing.length > 0 ? ` Нет: ${missing.join(', ')}.` : '';
+  return `Smoke критичных элементов не прошёл.${listed} Минималистичное меню не применяется, остаётся безопасный режим.`;
 }
 
 function formatSelectorScan(scan) {

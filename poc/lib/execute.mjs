@@ -7,6 +7,7 @@ import { POC_BACKGROUND, POC_BUTTON } from './page.mjs';
 import { buildLaunchArgs, sameColor } from './plan.mjs';
 import { buildReport } from './report.mjs';
 import { compareSnapshots } from './snapshot.mjs';
+import { attachStage1Decisions } from './stage1-decisions.mjs';
 
 const LAUNCH_PLATFORMS = new Set(['win32', 'linux']);
 
@@ -37,7 +38,8 @@ export async function executeProbe(env, deps) {
       full.selectorScan = safeScan(client.asar, collectTestIds(selectorMap));
     }
     if (facts.platform === 'linux') full.loopback = readLoopback();
-    return { exitCode, markdown: buildReport(full), facts: full };
+    const decided = attachStage1Decisions(full);
+    return { exitCode, markdown: buildReport(decided), facts: decided };
   };
   const fuses = await safeCall(() => deps.readFuses(client.exe));
   const versions = await safeCall(() => deps.readVersions?.(client));
