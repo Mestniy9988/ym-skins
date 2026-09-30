@@ -2,7 +2,15 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import net from 'node:net';
 
-import { analyserProbe, applySurface, menuProbe, pageExpression, readSurface, removeSurface } from './page.mjs';
+import {
+  analyserProbe,
+  applySurface,
+  menuProbe,
+  pageExpression,
+  readAnalyserPeaks,
+  readSurface,
+  removeSurface,
+} from './page.mjs';
 import { auditExpression, pickPageTarget } from './plan.mjs';
 import { decodeFrames, encodeControlFrame, encodeTextFrame } from './ws.mjs';
 
@@ -145,7 +153,8 @@ export async function inspectPage({ port, apply }) {
     let cdp;
     try {
       cdp = await connectCdp(picked.webSocketDebuggerUrl);
-      return await readApplied(cdp, apply);
+      const applied = await readApplied(cdp, apply);
+      return { ...applied, pageCount: picked.pageCount };
     } catch (error) {
       if (String(error?.message || '').includes('expression blocked')) throw error;
       lastError = error;
@@ -180,6 +189,7 @@ async function readApplied(cdp, apply) {
   const surface = await evaluate(cdp, documentCall(readSurface));
   const audio = await evaluate(cdp, `(${analyserProbe.toString()})(globalThis)`);
   const menu = await evaluate(cdp, documentCall(menuProbe));
+  const playback = await readPlaybackSpectrum(cdp);
   return {
     pageFound: true,
     background: surface?.background || null,
@@ -192,7 +202,11 @@ async function readApplied(cdp, apply) {
       hasAudioContextCtor: Boolean(audio?.hasAudioContextCtor),
       hasAnalyserNode: Boolean(audio?.hasAnalyserNode),
       liveContexts: await countAudioContexts(cdp),
-      spectrumRead: false,
+      analyserCount: playback ? playback.count : null,
+      spectrumPeak: playback ? playback.peak : null,
+      contextRunning: playback && Number.isInteger(playback.running) ? playback.running : null,
+      fftSize: playback && Number.isInteger(playback.fftSize) ? playback.fftSize : null,
+      spectrumRead: Boolean(playback && playback.peak > 0),
     },
     menu,
   };
@@ -273,6 +287,41 @@ async function evaluate(cdp, expression) {
   const response = await cdp.send('Runtime.evaluate', { expression, returnByValue: true });
   if (response.exceptionDetails) throw new Error('page expression failed');
   return response.result?.value;
+}
+
+async function readPlaybackSpectrum(cdp) {
+  let protoId = null;
+  let objectsId = null;
+  try {
+    const response = await cdp.send('Runtime.evaluate', {
+      expression: 'globalThis.AnalyserNode && globalThis.AnalyserNode.prototype',
+      returnByValue: false,
+    });
+    protoId = response.result?.objectId || null;
+    if (!protoId) return { count: 0, peak: 0, running: 0, fftSize: null };
+    const queried = await cdp.send('Runtime.queryObjects', { prototypeObjectId: protoId });
+    objectsId = queried.objects?.objectId || null;
+    if (!objectsId) return null;
+    const peaks = await cdp.send('Runtime.callFunctionOn', {
+      objectId: objectsId,
+      functionDeclaration: readAnalyserPeaks.toString(),
+      returnByValue: true,
+    });
+    const value = peaks.result?.value;
+    if (!value || typeof value.count !== 'number') return null;
+    const peak = typeof value.peak === 'number' ? value.peak : 0;
+    return {
+      count: value.count,
+      peak,
+      running: Number.isInteger(value.running) ? value.running : null,
+      fftSize: Number.isInteger(value.fftSize) ? value.fftSize : null,
+    };
+  } catch {
+    return null;
+  } finally {
+    if (protoId) await cdp.send('Runtime.releaseObject', { objectId: protoId }).catch(() => {});
+    if (objectsId) await cdp.send('Runtime.releaseObject', { objectId: objectsId }).catch(() => {});
+  }
 }
 
 async function countAudioContexts(cdp) {

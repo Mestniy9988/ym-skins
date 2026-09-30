@@ -21,8 +21,7 @@ export function buildReport(facts = {}) {
     '',
     'Инструмент неофициальный. Этот прогон не читает токены, cookies и данные аккаунта. app.asar не патчится.',
     '',
-    `- Платформа прогона: ${facts.platform || 'не проверено'}`,
-    '- Ожидаемая база: Windows 11 25H2, клиент 5.121.2. Номер ниже — только если он прочитан с машины.',
+    ...platformLines(facts),
     `- Клиент: ${clientLine(facts)}`,
     '',
     '## 1. Способ внедрения',
@@ -35,7 +34,7 @@ export function buildReport(facts = {}) {
     '',
     '## 3. AnalyserNode',
     '',
-    analyserSection(facts.analyser),
+    analyserSection(facts.analyser, facts.audioGraph, facts.loopback),
     '',
     '## 4. Где версия и как ловится обновление',
     '',
@@ -47,7 +46,7 @@ export function buildReport(facts = {}) {
     '',
     '## 6. Меню и блок настроек',
     '',
-    menuSection(facts.menu),
+    menuSection(facts.menu, facts.selectorMap, facts.selectorScan),
     '',
     '## Фон, кнопка и перезапуск',
     '',
@@ -61,6 +60,19 @@ export function buildReport(facts = {}) {
   return `${lines.join('\n')}\n`;
 }
 
+function platformLines(facts) {
+  if (facts.platform === 'linux') {
+    return [
+      '- Платформа прогона: linux. Это запуск Linux-пакета, не проверка Windows 11.',
+      '- Ожидаемая база Windows 11 25H2 этим запуском не проверялась. Номер клиента ниже — только если он прочитан с этой машины.',
+    ];
+  }
+  return [
+    `- Платформа прогона: ${facts.platform || 'не проверено'}`,
+    '- Ожидаемая база: Windows 11 25H2, клиент 5.121.2. Номер ниже — только если он прочитан с машины.',
+  ];
+}
+
 function clientLine(facts) {
   const client = facts.client;
   if (!client?.exe) return 'не проверено';
@@ -70,7 +82,7 @@ function clientLine(facts) {
 
 function injectionSection(facts) {
   if (facts.decision === 'not-windows') {
-    return 'Клиент не запускался: скрипт работает только на Windows и здесь процесс не стартовал. Способ внедрения не проверено. Этот прогон не является проверкой.';
+    return 'Клиент не запускался: этот скрипт стартует процесс на Windows и Linux, а здесь платформа другая. Способ внедрения не проверено. Этот прогон не является проверкой.';
   }
   if (facts.decision === 'client-not-found') {
     return 'Установленный клиент не найден. Способ внедрения не проверено.';
@@ -97,7 +109,19 @@ function injectionSection(facts) {
     return 'Клиент запускался с адресом 127.0.0.1, но слушающий порт не подтверждён как только localhost. Страница не внедрялась.';
   }
   if (facts.surface?.restoredAfterReinject && facts.launch?.loopback) {
-    return `На этом запуске клиент стартовал с отладочным портом ${facts.launch.port} на 127.0.0.1. Фон и кнопка менялись через CDP. Патч app.asar не выполнялся. После перезапуска тот же эффект снова ставится только повторным внедрением.`;
+    const host = facts.platform === 'linux' ? 'Linux-клиент' : 'клиент';
+    const lines = [
+      `На этом запуске ${host} стартовал с отладочным портом ${facts.launch.port} на 127.0.0.1. Фон и кнопка менялись через CDP. Патч app.asar не выполнялся. После перезапуска тот же эффект снова ставится только повторным внедрением.`,
+      'Для этого прогона выбран вариант А: протокол отладки на 127.0.0.1. Патч архива не выбран.',
+    ];
+    if (facts.platform === 'linux') {
+      lines.push('Этот выбор сделан по Linux-пакету. Windows-сборка этим прогоном не проверялась.');
+    }
+    if (facts.launch.noSandbox) {
+      lines.push('Флаг --no-sandbox добавлен, потому что chrome-sandbox в этом запуске без setuid. Для обычной установки он не является настройкой по умолчанию.');
+    }
+    if (facts.launch.gtk3) lines.push('Для окна в этом запуске добавлен --gtk-version=3.');
+    return lines.join(' ');
   }
   if (facts.decision === 'launch') {
     return 'Запуск с отладочным портом на 127.0.0.1 начинался, но эффект фона и кнопки после перезапуска не подтверждён. Способ внедрения не проверено. Патч app.asar не выполнялся.';
@@ -125,17 +149,64 @@ function fuseSection(fuses) {
   return lines.length > 0 ? lines.join('\n') : 'Electron Fuses: не проверено.';
 }
 
-function analyserSection(analyser) {
-  if (!analyser) return 'Web Audio AnalyserNode: не проверено. Системный loopback в этом прототипе не проверялся.';
-  const ctor = analyser.hasAnalyserNode ? 'конструктор AnalyserNode в странице есть' : 'конструктора AnalyserNode в странице нет';
-  const context = analyser.hasAudioContextCtor ? 'конструктор AudioContext есть' : 'конструктора AudioContext нет';
-  const live = analyser.liveContexts == null
-    ? 'живые AudioContext: не проверено'
-    : `живых AudioContext: ${analyser.liveContexts}`;
-  const spectrum = analyser.spectrumRead
-    ? 'спектр читался'
-    : 'спектр не снимался';
-  return `${ctor}; ${context}; ${live}; ${spectrum}.`;
+function analyserSection(analyser, audioGraph, loopback) {
+  if (!analyser && !audioGraph) {
+    return `Web Audio AnalyserNode: не проверено. ${loopbackLine(loopback)}`;
+  }
+  const lines = [];
+  if (analyser) {
+    const ctor = analyser.hasAnalyserNode ? 'конструктор AnalyserNode в странице есть' : 'конструктора AnalyserNode в странице нет';
+    const context = analyser.hasAudioContextCtor ? 'конструктор AudioContext есть' : 'конструктора AudioContext нет';
+    const live = analyser.liveContexts == null
+      ? 'живые AudioContext: не проверено'
+      : `живых AudioContext: ${analyser.liveContexts}`;
+    lines.push(`${ctor}; ${context}; ${live}.`);
+    lines.push(spectrumLine(analyser));
+  } else {
+    lines.push('Страница клиента не проверялась.');
+  }
+  const graph = graphLine(audioGraph);
+  if (graph) lines.push(graph);
+  lines.push(loopbackLine(loopback));
+  return lines.join(' ');
+}
+
+function loopbackLine(loopback) {
+  if (loopback?.status === 'no-device') return 'Системный loopback: устройство вывода не найдено.';
+  if (loopback?.status === 'present-untested') return 'Устройство вывода есть. Захват loopback не выполнялся.';
+  return 'Системный loopback не проверялся.';
+}
+
+function spectrumLine(analyser) {
+  if (analyser.spectrumRead) {
+    const peak = Number.isInteger(analyser.spectrumPeak) && analyser.spectrumPeak > 0 && analyser.spectrumPeak <= 255
+      ? ` Пик отсчёта ${analyser.spectrumPeak}.`
+      : '';
+    return `Спектр читался у существующего AnalyserNode.${peak}`;
+  }
+  if (analyser.analyserCount === 0) {
+    return 'Готовых AnalyserNode в странице нет. Спектр воспроизведения не снят.';
+  }
+  if (Number.isInteger(analyser.analyserCount) && analyser.analyserCount > 0) {
+    const running = Number.isInteger(analyser.contextRunning) ? `, контекст running: ${analyser.contextRunning}` : '';
+    const fft = Number.isInteger(analyser.fftSize) && analyser.fftSize > 0 && analyser.fftSize <= 32768
+      ? `, fftSize ${analyser.fftSize}`
+      : '';
+    return `AnalyserNode в странице: ${analyser.analyserCount}${running}${fft}. Отсчёты нулевые, спектр воспроизведения не снят.`;
+  }
+  return 'спектр не снимался.';
+}
+
+function graphLine(audioGraph) {
+  if (!audioGraph) return '';
+  if (audioGraph.complete) {
+    return 'В app.asar есть вызовы createMediaElementSource, createAnalyser и getByteFrequencyData. Это граф страницы вокруг элемента воспроизведения, не системный loopback.';
+  }
+  const missing = [];
+  if (!audioGraph.mediaElement) missing.push('createMediaElementSource');
+  if (!audioGraph.analyser) missing.push('createAnalyser');
+  if (!audioGraph.frequency) missing.push('getByteFrequencyData');
+  return `В app.asar не найдены вызовы: ${missing.join(', ')}.`;
 }
 
 function versionSection(facts) {
@@ -168,27 +239,82 @@ function versionSection(facts) {
   return lines.join('\n');
 }
 
-function menuSection(menu) {
-  if (!menu) return 'Скрытие пунктов меню и блок в настройках: не проверено.';
+function menuSection(menu, selectorMap, selectorScan) {
+  const mapVersion = safeMapVersion(selectorMap);
+  if (!menu) {
+    const scanLine = formatSelectorScan(selectorScan);
+    const base = mapVersion
+      ? `Карта селекторов ${mapVersion} есть. Страница меню не проверялась.`
+      : 'Скрытие пунктов меню и блок в настройках: не проверено.';
+    return scanLine ? `${base}\n${scanLine}` : base;
+  }
   const lines = [];
+  if (menu.regionScreen) {
+    lines.push('Страница показала, что сервис недоступен в этом регионе. Это не плеер и не настройки.');
+  }
+  if (menu.navbarFound === true) {
+    lines.push('Боковая навигация с data-test-id NAVBAR на странице есть.');
+  } else if (menu.navbarFound === false) {
+    lines.push('Боковая навигация NAVBAR на странице не найдена.');
+  }
   if (menu.hideTried) {
-    lines.push(
-      menu.hideApplied && menu.hideReverted
-        ? `Обратимая проба спрятала один дочерний узел навигации (узлов навигации: ${menu.navCount}) и вернула его на место.`
-        : 'Проба скрытия узла навигации не подтвердила обратимый эффект.',
-    );
+    const named = typeof menu.hiddenTestId === 'string' && /^[A-Z0-9_]{1,80}$/.test(menu.hiddenTestId)
+      ? menu.hiddenTestId
+      : '';
+    if (menu.hideApplied && menu.hideReverted && named) {
+      lines.push(`Обратимая проба спрятала пункт ${named} и вернула его на место.`);
+    } else if (menu.hideApplied && menu.hideReverted) {
+      lines.push(`Обратимая проба спрятала один дочерний узел навигации (узлов навигации: ${menu.navCount}) и вернула его на место.`);
+    } else {
+      lines.push('Проба скрытия узла навигации не подтвердила обратимый эффект.');
+    }
   } else {
     lines.push('Узел навигации для пробы не найден. Скрытие пунктов меню не проверено.');
   }
-  lines.push(
-    menu.settingsPageOpened
-      ? 'Страница настроек открывалась.'
-      : 'Проверено частично: страница настроек не открывалась, встраивание блока в неё не проверено.',
-  );
+  if (mapVersion && menu.navbarFound === false) {
+    lines.push(`Карта селекторов ${mapVersion} задаёт NAVBAR и скрываемые пункты. На этой странице их нет.`);
+  }
+  if (Number.isInteger(menu.pageCount)) {
+    lines.push(menu.pageCount === 1 ? 'Отладчик отдал одну страницу.' : `Отладчик отдал страниц: ${menu.pageCount}.`);
+  }
+  if (menu.settingsListFound) {
+    if (menu.appearanceInserted === true && menu.appearanceFirst === true && menu.appearanceRemoved === true) {
+      lines.push('Обратимая проба поставила блок «Оформление» первым в SETTINGS_LIST и сразу сняла его.');
+    } else if (menu.appearanceInserted === true && menu.appearanceRemoved === false) {
+      lines.push('Проба поставила блок «Оформление» в SETTINGS_LIST и не сняла его.');
+    } else if (menu.appearanceInserted === false) {
+      lines.push('На странице есть список настроек SETTINGS_LIST. Блок «Оформление» в начало списка не встал.');
+    } else {
+      lines.push('На странице есть список настроек SETTINGS_LIST. Блок «Оформление» этим прогоном не встраивался.');
+    }
+  } else if (menu.settingsPageOpened) {
+    lines.push('Страница настроек открывалась. Блок «Оформление» этим прогоном не встраивался.');
+  } else if (menu.settingsListFound === false) {
+    lines.push('Список настроек SETTINGS_LIST не найден. Встраивание блока «Оформление» не проверено.');
+  } else {
+    lines.push('Проверено частично: страница настроек не открывалась, встраивание блока в неё не проверено.');
+  }
   if (menu.bodyInsertRemoved) {
     lines.push('В document.body узел ставится и тут же снимается. Это не раздел настроек.');
   }
+  const scanLine = formatSelectorScan(selectorScan);
+  if (scanLine) lines.push(scanLine);
   return lines.join('\n');
+}
+
+function formatSelectorScan(scan) {
+  if (!scan || !Array.isArray(scan.found) || !Array.isArray(scan.missing)) return '';
+  const ok = (id) => typeof id === 'string' && /^[A-Z0-9_]{1,80}$/.test(id);
+  const found = scan.found.filter(ok);
+  const missing = scan.missing.filter(ok);
+  if (found.length + missing.length === 0) return '';
+  if (missing.length === 0) return `В app.asar есть отдельные строки всех ${found.length} id карты селекторов.`;
+  return `В app.asar нет id карты: ${missing.join(', ')}. Найдены: ${found.length}.`;
+}
+
+function safeMapVersion(selectorMap) {
+  const version = selectorMap?.ymVersion;
+  return typeof version === 'string' && /^\d+\.\d+\.\d+$/.test(version) ? version : '';
 }
 
 function surfaceSection(surface) {

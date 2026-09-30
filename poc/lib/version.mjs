@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { readRootPackage } from './asar-meta.mjs';
+import { isWindowsExePath } from './plan.mjs';
 
 export async function readVersions(client) {
   let asar = null;
@@ -14,8 +15,13 @@ export async function readVersions(client) {
   return {
     asar,
     exe: await readExeVersion(client.exe),
-    updateFeed: readUpdateFeed(path.win32.join(path.win32.dirname(client.exe), 'resources', 'app-update.yml')),
+    updateFeed: readUpdateFeed(resourcesFile(client.exe, 'app-update.yml')),
   };
+}
+
+function resourcesFile(exe, name) {
+  if (isWindowsExePath(exe)) return path.win32.join(path.win32.dirname(exe), 'resources', name);
+  return path.join(path.dirname(exe), 'resources', name);
 }
 
 function readExeVersion(exe) {
