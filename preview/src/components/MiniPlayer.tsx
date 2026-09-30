@@ -36,6 +36,7 @@ export function MiniPlayer(props: PlayerProps & { compact?: boolean }) {
     <div
       className="wa-stack"
       data-skin={skin.id}
+      data-theme={theme.id}
       data-playing={playing}
       data-anim={animate ? 'on' : 'off'}
       style={skinStyle(theme, track)}

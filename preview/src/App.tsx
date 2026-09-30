@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { AppMock, MOCK_H, MOCK_W, type Page } from '@/components/AppMock'
 import { Scaler } from '@/components/Scaler'
-import { ORIGINAL, SKINS, TRACKS } from '@/data/skins'
+import { ORIGINAL, SKINS, TRACKS, themeAt } from '@/data/skins'
 
 type Example = { skin: string; theme: number; page: Page; title: string; caption: string; query?: string }
 
@@ -43,11 +43,11 @@ export default function App() {
 
   const chosenSkin = SKINS[skinIdx]
   const skin = original ? ORIGINAL : chosenSkin
-  const theme = skin.themes[original ? 0 : themeIdx]
+  const theme = themeAt(skin, original ? 0 : themeIdx)
   const track = TRACKS[trackIdx]
 
   useEffect(() => {
-    const h = `ex=${example + 1}&skin=${chosenSkin.id}&theme=${chosenSkin.themes[themeIdx].id}&page=${page}${original ? '&original=1' : ''}`
+    const h = `ex=${example + 1}&skin=${chosenSkin.id}&theme=${themeAt(chosenSkin, themeIdx).id}&page=${page}${original ? '&original=1' : ''}`
     if (window.location.hash.slice(1) !== h) window.history.replaceState(null, '', `#${h}`)
   }, [example, chosenSkin, themeIdx, page, original])
 
@@ -190,7 +190,7 @@ export default function App() {
         <p className="mt-4 flex items-start gap-2 text-sm leading-relaxed text-zinc-400">
           <MousePointerClick className="mt-0.5 size-4 shrink-0 text-amber-300/80" />
           Окно интерактивное: разделы в боковом меню переключаются, поиск ищет по трекам, сердечко добавляет трек в «Мою музыку». В «Настройках → Оформление»
-          можно выбрать любой из 12 скинов, посмотреть его в окне примера и применить, либо включить оригинальную тему.
+          можно выбрать любой из 14 скинов, посмотреть его в окне примера и применить, либо включить оригинальную тему. У Escape from Tarkov и «Мира танков» по три варианта. Это неофициальные стилизации, без логотипов и графики игр.
         </p>
       </div>
     </div>

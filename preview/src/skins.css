@@ -2890,7 +2890,7 @@
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   align-content: start;
-  gap: 10px;
+  gap: 8px;
 }
 .ym-skin-tile {
   display: flex;
@@ -2914,7 +2914,7 @@
 .ym-skin-swatch {
   position: relative;
   display: block;
-  height: 58px;
+  height: 44px;
   overflow: hidden;
   border: 1px solid rgba(0, 0, 0, 0.35);
   border-radius: calc(var(--radius) * 0.6);
@@ -2973,6 +2973,8 @@
 }
 .ym-skin-preview .ym-seg {
   align-self: flex-start;
+  flex-wrap: wrap;
+  max-width: 100%;
 }
 .ym-set-label {
   font-size: 12px;
@@ -3107,4 +3109,191 @@
   text-shadow:
     2px 0 var(--accent),
     -2px 0 var(--accent-2);
+}
+
+/* ════════════════════ 13. Escape from Tarkov ════════════════════ */
+
+[data-skin='tarkov'] {
+  --radius: 2px;
+  --win-radius: 2px;
+  --btn-radius: 2px;
+  --tbtn-radius: 2px;
+  --font-display: 'Russo One', 'Inter Variable', sans-serif;
+  --font-lcd: 'Share Tech Mono', 'Inter Variable', monospace;
+  --wa-border: #0a0c08;
+  --bevel: inset 1px 1px 0 rgba(255, 255, 255, 0.16), inset -1px -1px 0 rgba(0, 0, 0, 0.55);
+}
+[data-skin='tarkov'].ym,
+[data-skin='tarkov'] .wa {
+  background-image:
+    repeating-linear-gradient(-45deg, transparent 0 11px, rgba(0, 0, 0, 0.16) 11px 12px),
+    var(--bg);
+}
+[data-skin='tarkov'][data-theme='nvg'].ym,
+[data-skin='tarkov'][data-theme='nvg'] .wa {
+  background-image:
+    repeating-linear-gradient(0deg, transparent 0 3px, rgba(0, 0, 0, 0.28) 3px 4px),
+    radial-gradient(80% 70% at 50% 45%, transparent 40%, rgba(0, 0, 0, 0.55) 100%),
+    var(--bg);
+}
+[data-skin='tarkov'][data-theme='shelter'].ym,
+[data-skin='tarkov'][data-theme='shelter'] .wa {
+  background-image:
+    radial-gradient(40% 30% at 80% 0%, rgba(224, 122, 61, 0.28), transparent 70%),
+    var(--bg);
+}
+[data-skin='tarkov'] .ym-titlebar,
+[data-skin='tarkov'] .ym-kicker,
+[data-skin='tarkov'] .ym-set-title {
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+[data-skin='tarkov'] .ym-dots {
+  display: none;
+}
+[data-skin='tarkov'] .ym-titlebar-name::before {
+  content: 'INV-04  ';
+  color: var(--accent);
+}
+[data-skin='tarkov'] .ym-side,
+[data-skin='tarkov'] .ym-hero,
+[data-skin='tarkov'] .ym-player,
+[data-skin='tarkov'] .ym-lcd,
+[data-skin='tarkov'] .ym-set-section,
+[data-skin='tarkov'] .wa {
+  box-shadow: var(--bevel);
+}
+[data-skin='tarkov'] .ym-h1,
+[data-skin='tarkov'] .ym-page-title {
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+[data-skin='tarkov'] .ym-nav-item[data-active='true'] {
+  background: transparent;
+  box-shadow: inset 3px 0 0 var(--accent);
+  color: var(--accent);
+}
+[data-skin='tarkov'] .ym-lcd {
+  border: 1px solid color-mix(in srgb, var(--lcd-fg) 45%, #000);
+  animation: tarkov-flicker 5.2s steps(2) infinite;
+}
+@keyframes tarkov-flicker {
+  0%,
+  91%,
+  100% {
+    opacity: 1;
+  }
+  93% {
+    opacity: 0.62;
+  }
+  96% {
+    opacity: 0.9;
+  }
+}
+[data-skin='tarkov'] .ym-tbtn,
+[data-skin='tarkov'] .ym-logo-mark,
+[data-skin='tarkov'] .ym-btn {
+  border-radius: 2px;
+  box-shadow: var(--bevel);
+}
+[data-skin='tarkov'] .ym-progress,
+[data-skin='tarkov'] .ym-vol {
+  height: 8px;
+  border-radius: 0;
+  background: repeating-linear-gradient(90deg, var(--line) 0 2px, transparent 2px 6px);
+}
+.wa-stack[data-skin='tarkov'] .wa-title-text,
+.wa-stack[data-skin='tarkov'] .wa-time,
+.wa-stack[data-skin='tarkov'] .wa-marquee {
+  font-family: var(--font-lcd);
+  color: var(--lcd-fg);
+}
+.wa-stack[data-skin='tarkov'] .wa-display {
+  background: var(--lcd-bg);
+  border: 1px solid color-mix(in srgb, var(--lcd-fg) 40%, #000);
+}
+
+/* ════════════════════ 14. Мир Танков ════════════════════ */
+
+[data-skin='tanks'] {
+  --radius: 4px;
+  --win-radius: 4px;
+  --btn-radius: 3px;
+  --font-display: 'Russo One', 'Inter Variable', sans-serif;
+  --font-lcd: 'Russo One', 'Inter Variable', sans-serif;
+  --wa-border: #1a140c;
+  --bevel: inset 0 1px 0 rgba(255, 255, 255, 0.28), inset 0 -2px 0 rgba(0, 0, 0, 0.35);
+}
+[data-skin='tanks'].ym,
+[data-skin='tanks'] .wa {
+  background-image:
+    radial-gradient(circle at 8px 8px, rgba(0, 0, 0, 0.45) 1.3px, transparent 1.7px),
+    repeating-linear-gradient(90deg, transparent 0 46px, rgba(0, 0, 0, 0.14) 46px 54px),
+    var(--bg);
+  background-size:
+    26px 26px,
+    auto,
+    auto;
+}
+[data-skin='tanks'][data-theme='sand'].ym,
+[data-skin='tanks'][data-theme='sand'] .wa {
+  background-image:
+    radial-gradient(circle at 8px 8px, rgba(0, 0, 0, 0.4) 1.3px, transparent 1.7px),
+    repeating-linear-gradient(115deg, transparent 0 28px, rgba(90, 60, 20, 0.28) 28px 40px),
+    var(--bg);
+}
+[data-skin='tanks'][data-theme='snow'].ym,
+[data-skin='tanks'][data-theme='snow'] .wa {
+  background-image:
+    radial-gradient(circle at 8px 8px, rgba(20, 32, 40, 0.35) 1.2px, transparent 1.6px),
+    repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.35) 0 10px, transparent 10px 22px),
+    var(--bg);
+}
+[data-skin='tanks'] .ym-titlebar,
+[data-skin='tanks'] .ym-kicker,
+[data-skin='tanks'] .ym-set-title,
+[data-skin='tanks'] .ym-page-title,
+[data-skin='tanks'] .ym-h1 {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+[data-skin='tanks'] .ym-dots {
+  display: none;
+}
+[data-skin='tanks'] .ym-titlebar-name::before {
+  content: '04  ';
+  color: var(--accent);
+}
+[data-skin='tanks'] .ym-side,
+[data-skin='tanks'] .ym-player,
+[data-skin='tanks'] .ym-hero,
+[data-skin='tanks'] .ym-set-section,
+[data-skin='tanks'] .wa {
+  box-shadow: var(--bevel);
+}
+[data-skin='tanks'] .ym-nav-item[data-active='true'] {
+  background: transparent;
+  color: var(--text);
+  box-shadow: inset 4px 0 0 var(--accent);
+}
+[data-skin='tanks'] .ym-lcd,
+.wa-stack[data-skin='tanks'] .wa-display {
+  background: var(--lcd-bg);
+  color: var(--lcd-fg);
+  border: 2px solid var(--line);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+[data-skin='tanks'] .ym-tbtn-play,
+[data-skin='tanks'] .ym-logo-mark {
+  border-radius: 3px;
+}
+[data-skin='tanks'] .ym-progress,
+[data-skin='tanks'] .ym-vol {
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid var(--line);
+}
+.wa-stack[data-skin='tanks'] .wa-title-text {
+  font-family: var(--font-display);
+  letter-spacing: 0.12em;
 }
