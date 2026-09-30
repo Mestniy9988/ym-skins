@@ -1,7 +1,9 @@
 import { chooseAudioSource } from './audio-source.mjs';
+import { compatibilityStatus } from './compat-status.mjs';
 import { smokeSelectors } from './compat.mjs';
 import { injectionAllowed } from './kill-switch.mjs';
 import { combineMacSign } from './macos-sign.mjs';
+import { skinGate } from './skin-gate.mjs';
 import { classifySpectrum } from './spectrum.mjs';
 import { decideUpdate } from './update-policy.mjs';
 
@@ -38,6 +40,16 @@ export function attachStage1Decisions(facts = {}) {
   if (facts.macCodesign != null || facts.macSpctl != null) {
     next.macSign = combineMacSign(facts.macCodesign ?? '', facts.macSpctl ?? '');
   }
+  next.compatStatus = compatibilityStatus({
+    smoke: next.smoke,
+    updateDecision: next.updateDecision,
+    injection: next.injection,
+  });
+  next.skinGate = skinGate({
+    smoke: next.smoke,
+    injection: next.injection,
+    original: facts.originalTheme === true,
+  });
   return next;
 }
 
